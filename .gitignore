@@ -105,10 +105,10 @@ ipython_config.py
 #.pdm-build/
 
 # virtualenv
-venv/
-ENV/
-env/
-active_env/
+# venv/
+# ENV/
+# env/
+# active_env/
 
 # IDEs and Editors
 .idea/
@@ -122,9 +122,9 @@ active_env/
 .claude/
 
 # Local Environment Variables
-.env
-.env.local
-.env.*.local
+# .env
+# .env.local
+# .env.*.local
 
 # Local Log files
 *.log
