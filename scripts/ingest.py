@@ -54,10 +54,10 @@ URLS_TO_SCRAPE = [
 ]
 
 def clean_html(html: str, url: str) -> dict:
-    """Extract meaningful text from HTML."""
+
     soup = BeautifulSoup(html, "html.parser")
 
-    # Remove script, style, navigation and footer elements
+   
     for tag in soup(["script", "style", "noscript", "svg", "path", "meta", "link"]):
         tag.decompose()
     for comment in soup.find_all(string=lambda t: isinstance(t, Comment)):
@@ -77,7 +77,7 @@ def clean_html(html: str, url: str) -> dict:
     text = main_el.get_text(separator="\n", strip=True)
     lines = [line.strip() for line in text.split("\n") if len(line.strip()) > 10]
     
-    # Deduplicate identical consecutive lines
+
     deduped = []
     for line in lines:
         if not deduped or line != deduped[-1]:
@@ -92,7 +92,7 @@ def fetch_url(url: str) -> str:
         return response.read().decode('utf-8', errors='ignore')
 
 async def scrape_all_urls() -> List[dict]:
-    """Fetch all URLs concurrently using urllib and extract text."""
+
     documents = []
     logger.info(f"Starting crawl of {len(URLS_TO_SCRAPE)} URLs...")
     loop = asyncio.get_running_loop()
@@ -112,12 +112,11 @@ async def scrape_all_urls() -> List[dict]:
         doc = clean_html(resp, url)
         if len(doc["content"]) > 50:
             documents.append(doc)
-            logger.info(f"✓ Scraped {url} ({len(doc['content'])} chars)")
+            logger.info(f"Scraped {url} ({len(doc['content'])} chars)")
 
     return documents
 
 def chunk_documents(documents: List[dict]) -> List[dict]:
-    """Split documents into overlapping chunks."""
     all_chunks = []
     for doc in documents:
         text = doc["content"]
@@ -190,7 +189,7 @@ async def main():
                 db.add(db_chunk)
             
             await db.commit()
-            logger.info("✓ Successfully ingested chunks into PostgreSQL!")
+            logger.info("Successfully ingested chunks into PostgreSQL!")
         except Exception as e:
             logger.error(f"Error saving to database: {e}")
             await db.rollback()

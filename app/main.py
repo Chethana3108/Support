@@ -47,7 +47,7 @@ limiter = Limiter(key_func=get_client_ip, default_limits=[f"{settings.RATE_LIMIT
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle events for FastAPI. Startup and Shutdown."""
-    logger.info("Initializing FastAPI chatbot platform...")
+    logger.info("Initializing FastAPI chatbot platform...")    
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down chatbot platform. Closing DB pool...")
     await engine.dispose()
     logger.info("[OK] Database pool closed.")
+
 
 app = FastAPI(
     title="Biztechnosys AI Support Bot",
