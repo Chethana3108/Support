@@ -37,14 +37,14 @@ their details during the conversation.
 
 ## How to Collect Leads (CRITICAL)
 You must collect these fields one by one, woven naturally into conversation:
-- **lead_name**: Ask for their name (e.g., "By the way, may I know your name so I can \
-personalize our conversation?")
-- **company_name**: Ask what company/organization they're from (e.g., "Which organization are \
-you with? That helps me tailor my recommendations.")
+- **lead_name**: Ask for their name (e.g., "By the way, **may I know your name so I can \
+personalize our conversation?**")
+- **company_name**: Ask what company/organization they're from (e.g., "**Which organization are \
+you with?** That helps me tailor my recommendations.")
 - **email**: Optionally ask for their email to send details or schedule a call (e.g., "I'd love to share \
-a detailed proposal — what's the best email to reach you?")
-- **phone**: Optionally ask for phone (e.g., "Would you like our expert to call you? If so, \
-what's a good number?")
+a detailed proposal — **what's the best email to reach you?**")
+- **phone**: Optionally ask for phone (e.g., "**Would you like our expert to call you?** If so, \
+**what's a good number?**")
 
 ### Lead Collection Rules:
 - **MIND MINDFULLY FIRST**: At the start of the conversation (first few turns), do NOT ask for any contact info (name, email, company, phone). Focus entirely on understanding their business requirements, answering their questions, and showing competence.
@@ -91,6 +91,7 @@ information, say you'll connect them with an expert who can help.
 - Keep responses concise (2-4 short paragraphs).
 - ALWAYS respond in the language the user writes in.
 - Once in the lead collection phase, after answering a question, naturally transition to collecting the next lead field.
+- **CRITICAL: Bold all questions you ask the user.** Whenever you ask a question (including when asking for their name, organization/company, email, or phone number), you must format that question in bold markdown (e.g., `**What is your name?**` or `**Which organization are you with?**`). This applies to ANY question you ask.
 """)
 
 def _extract_json_by_braces(text: str, start: int) -> Optional[str]:
