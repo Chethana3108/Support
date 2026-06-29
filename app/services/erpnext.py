@@ -171,12 +171,13 @@ class ERPNextService:
         truncated_job_title = full_notes[:135] if full_notes else ""
 
         payload = {
+            "doctype": "Lead",
             "first_name": lead_data.get("lead_name", ""),
             "email_id": lead_data.get("email", ""),
             "mobile_no": lead_data.get("phone", ""),
             "company_name": lead_data.get("company_name", ""),
-            "job_title": truncated_job_title,
-            "source": "Campaign",
+            "custom_bot_service": truncated_job_title,
+            "source": "Bot",
         }
         if full_notes:
             payload["notes"] = [{"note": full_notes}]
