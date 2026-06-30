@@ -37,7 +37,7 @@ class LeadService:
             prev_lead = result_prev.scalar_one_or_none()
             
             if prev_lead:
-                logger.info(f"Pre-populating lead state from previous conversation for user: {user_id}")
+                logger.debug(f"Pre-populating lead state from previous conversation for user: {user_id}")
                 lead_state = LeadState(
                     conversation_id=conversation_id,
                     lead_name=prev_lead.lead_name,
@@ -95,7 +95,7 @@ class LeadService:
         
         if newly_filled:
             await db.commit()
-            logger.info(f"Updated lead state fields {list(newly_filled.keys())} for session {conversation_id}")
+            logger.debug(f"Updated lead fields {list(newly_filled.keys())} for session {conversation_id}")
         
         return lead_state, newly_filled
 
@@ -119,10 +119,9 @@ class LeadService:
         # Minimum fields required for lead creation in ERPNext
         has_mandatory = bool(lead_state.lead_name and lead_state.company_name)
 
-        logger.info(
-            f"[LEAD-SYNC] Entry: lead_name='{lead_state.lead_name}', "
-            f"company_name='{lead_state.company_name}', email='{lead_state.email}', "
-            f"phone='{lead_state.phone}', lead_saved={lead_state.lead_saved}, "
+        logger.debug(
+            f"Lead sync check: name='{lead_state.lead_name}', "
+            f"company='{lead_state.company_name}', saved={lead_state.lead_saved}, "
             f"lead_id='{lead_state.lead_id}', has_mandatory={has_mandatory}, "
             f"newly_filled={newly_filled}"
         )
@@ -137,101 +136,83 @@ class LeadService:
 
         # ── PATH 1: Lead NOT yet saved, but we have name + company → CREATE ──
         if not lead_state.lead_saved and has_mandatory:
-            email = lead_state.email
-            logger.info(
-                f"[LEAD-SYNC] CREATE PATH: Attempting to create/find lead for session "
-                f"{lead_state.conversation_id} (name: {lead_state.lead_name}, "
-                f"company: {lead_state.company_name}, email: {email or '(not yet collected)'})"
+            logger.debug(
+                f"Attempting to create/find lead for session {lead_state.conversation_id}"
             )
             
             # Try to find existing lead: first by email, then by name+company
             existing_lead_id = None
             try:
-                if email:
-                    existing_lead_id = await ERPNextService.get_lead_by_email(email)
-                    logger.info(f"[LEAD-SYNC] Search by email '{email}' result: {existing_lead_id}")
+                if lead_state.email:
+                    existing_lead_id = await ERPNextService.get_lead_by_email(lead_state.email)
+                    logger.debug(f"Search by email result: {existing_lead_id}")
                 if not existing_lead_id:
                     existing_lead_id = await ERPNextService.get_lead_by_name_and_company(
                         lead_state.lead_name, lead_state.company_name
                     )
-                    logger.info(f"[LEAD-SYNC] Search by name+company result: {existing_lead_id}")
+                    logger.debug(f"Search by name+company result: {existing_lead_id}")
             except Exception as e:
-                logger.error(f"[LEAD-SYNC] Error checking existing lead: {e}", exc_info=True)
+                logger.error(f"Error checking existing lead: {e}", exc_info=True)
 
             if existing_lead_id:
                 lead_state.lead_id = existing_lead_id
                 lead_state.lead_saved = True
                 await db.commit()
-                logger.info(f"[LEAD-SYNC] Found existing lead, marked lead_saved=True, ID: {existing_lead_id}")
                 
                 try:
                     result = await ERPNextService.update_lead(existing_lead_id, lead_dict)
                     if result.get("success"):
-                        logger.info(f"[LEAD-SYNC] [OK] Associated and updated existing ERPNext Lead ID: {existing_lead_id}")
+                        logger.info(f"Lead updated (existing): {existing_lead_id}")
                         return True
                     else:
-                        logger.error(f"[LEAD-SYNC] update_lead returned unsuccessful: {result}")
+                        logger.error(f"Failed to update existing lead {existing_lead_id}: {result}")
                 except Exception as e:
-                    logger.error(f"[LEAD-SYNC] Failed to update associated lead {existing_lead_id}: {e}", exc_info=True)
+                    logger.error(f"Failed to update existing lead {existing_lead_id}: {e}", exc_info=True)
             else:
-                logger.info(
-                    f"[LEAD-SYNC] No existing lead found. Creating new lead with: "
-                    f"name='{lead_state.lead_name}', company='{lead_state.company_name}', "
-                    f"email='{lead_state.email or '(empty)'}', phone='{lead_state.phone or '(empty)'}'"
-                )
+                logger.debug("No existing lead found, creating new lead")
                 try:
                     result = await ERPNextService.create_lead(lead_dict)
-                    logger.info(f"[LEAD-SYNC] create_lead result: {result}")
                     if result.get("success"):
                         lead_state.lead_saved = True
                         try:
                             res_json = json.loads(result["detail"])
                             lead_state.lead_id = res_json["data"]["name"]
-                            logger.info(f"[LEAD-SYNC] Parsed new lead ID: {lead_state.lead_id}")
                         except Exception as parse_err:
-                            logger.warning(f"[LEAD-SYNC] Could not parse created ERPNext lead ID: {parse_err}")
+                            logger.warning(f"Could not parse created ERPNext lead ID: {parse_err}")
                         await db.commit()
-                        logger.info(f"[LEAD-SYNC] [OK] Created new ERPNext Lead. Session: {lead_state.conversation_id}, lead_saved={lead_state.lead_saved}")
+                        logger.info(f"Lead created: {lead_state.lead_id}")
                         return True
                     else:
                         # ERPNext returned a 4xx error (e.g., validation failure)
-                        # Log the full detail so we can diagnose
                         status = result.get("status_code", "unknown")
                         detail = result.get("detail", "no detail")
                         logger.error(
-                            f"[LEAD-SYNC] ERPNext REJECTED lead creation (HTTP {status}). "
-                            f"Detail: {detail}. "
-                            f"This may mean ERPNext requires additional mandatory fields "
-                            f"(e.g., email). Lead will be retried on the next turn when "
-                            f"more fields are collected."
+                            f"ERPNext rejected lead creation (HTTP {status}): {detail}"
                         )
                 except Exception as e:
-                    logger.error(f"[LEAD-SYNC] Failed to create new lead: {e}", exc_info=True)
+                    logger.error(f"Failed to create new lead: {e}", exc_info=True)
 
         # ── PATH 2: Lead ALREADY saved → UPDATE with newly collected fields ──
         elif lead_state.lead_saved and lead_state.lead_id and newly_filled:
-            logger.info(f"[LEAD-SYNC] UPDATE PATH: Updating lead ID {lead_state.lead_id} with new fields")
             try:
                 result = await ERPNextService.update_lead(lead_state.lead_id, lead_dict)
                 if result.get("success"):
-                    logger.info(f"[LEAD-SYNC] [OK] Updated existing ERPNext Lead ID: {lead_state.lead_id}")
+                    logger.info(f"Lead updated: {lead_state.lead_id}")
                     return True
                 else:
-                    logger.error(f"[LEAD-SYNC] update_lead returned unsuccessful: {result}")
+                    logger.error(f"Failed to update lead {lead_state.lead_id}: {result}")
             except Exception as e:
-                logger.error(f"[LEAD-SYNC] Failed to update lead {lead_state.lead_id}: {e}", exc_info=True)
+                logger.error(f"Failed to update lead {lead_state.lead_id}: {e}", exc_info=True)
         else:
             # Log why we're skipping sync
-            reasons = []
             if lead_state.lead_saved and not newly_filled:
-                reasons.append("lead already saved and no newly filled fields")
-            if not has_mandatory:
+                logger.debug("Lead sync skipped: already saved, no new fields")
+            elif not has_mandatory:
                 missing = []
                 if not lead_state.lead_name:
                     missing.append("lead_name")
                 if not lead_state.company_name:
                     missing.append("company_name")
-                reasons.append(f"missing mandatory fields: {missing}")
-            logger.info(f"[LEAD-SYNC] SKIP: No sync action taken. Reason: {'; '.join(reasons)}")
+                logger.debug(f"Lead sync skipped: missing {missing}")
 
         return False

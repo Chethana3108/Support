@@ -15,13 +15,26 @@ from app.config import settings
 from app.database import get_db, engine
 from app.routers import chat, sessions
 
-
+ 
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
     format='{"time": "%(asctime)s", "level": "%(levelname)s", "name": "%(name)s", "message": "%(message)s"}',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger("biztechbot")
+
+# ── Silence noisy third-party loggers ──────────────────────────────────────
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+try:
+    from transformers import logging as transformers_logging
+    transformers_logging.set_verbosity_error()
+except ImportError:
+    pass  # transformers not installed — nothing to silence
 
 # Custom client IP resolver for proxy-safe rate limiting
 def get_client_ip(request: Request) -> str:
@@ -51,15 +64,23 @@ async def lifespan(app: FastAPI):
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-            logger.info("[OK] Database connection verified successfully.")
+            logger.info("Database connection verified")
     except Exception as e:
-        logger.critical(f"[ERROR] Database connection failed on startup: {e}")
+        logger.critical(f"Database connection failed on startup: {e}")
+    
+    # Pre-load ML models at startup so they're ready for first request
+    from app.services.embedder import EmbedderService
+    from app.services.reranker import RerankerService
+    logger.info("Loading ML models...")
+    EmbedderService.get_model()
+    RerankerService.get_model()
+    logger.info("ML models loaded — ready to serve requests")
     
     yield
     
-    logger.info("Shutting down chatbot platform. Closing DB pool...")
+    logger.info("Shutting down — closing DB pool")
     await engine.dispose()
-    logger.info("[OK] Database pool closed.")
+    logger.info("Database pool closed")
 
 
 app = FastAPI(
@@ -92,7 +113,7 @@ async def add_process_time_header(request: Request, call_next):
     response = await call_next(request)
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
-    logger.info(f"path={request.url.path} method={request.method} latency={process_time:.4f}s status={response.status_code}")
+    logger.info(f"{request.method} {request.url.path} {response.status_code} {process_time:.2f}s")
     return response
 
 # Custom HTTP exception handling for clean error logs
@@ -137,7 +158,4 @@ async def health(db: AsyncSession = Depends(get_db)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
-
-
-
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, access_log=False)

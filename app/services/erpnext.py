@@ -129,7 +129,7 @@ class ERPNextService:
         payload = {k: v for k, v in payload.items() if v}
         headers = cls._get_headers()
 
-        logger.info(f"[ERPNEXT-CREATE] Sending payload to ERPNext: {json.dumps(payload, default=str)}")
+        logger.debug(f"ERPNext create payload: {json.dumps(payload, default=str)}")
 
         async with httpx.AsyncClient(timeout=15, verify=settings.ERPNEXT_SSL_VERIFY) as client:
             try:
@@ -139,7 +139,7 @@ class ERPNextService:
                     json=payload,
                 )
                 resp.raise_for_status()
-                logger.info(f"[ERPNEXT-CREATE] Lead creation success: {resp.status_code}")
+                logger.debug(f"ERPNext lead creation success: {resp.status_code}")
                 return {"success": resp.status_code in (200, 201), "detail": resp.text}
             except httpx.HTTPStatusError as e:
                 error_body = e.response.text
@@ -194,7 +194,7 @@ class ERPNextService:
                     json=payload,
                 )
                 resp.raise_for_status()
-                logger.info(f"ERPNext lead update success: {resp.status_code}")
+                logger.debug(f"ERPNext lead update success: {resp.status_code}")
                 return {"success": resp.status_code == 200, "detail": resp.text}
             except httpx.HTTPStatusError as e:
                 logger.error(f"ERPNext lead update failed with {e.response.status_code}: {e.response.text}")

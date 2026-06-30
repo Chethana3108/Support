@@ -14,9 +14,9 @@ class EmbedderService:
     def get_model(cls) -> SentenceTransformer:
         """Lazy load the SentenceTransformer model to optimize startup memory usage."""
         if cls._model is None:
-            logger.info(f"Loading SentenceTransformer model: {settings.EMBEDDING_MODEL}...")
+            logger.debug(f"Loading SentenceTransformer model: {settings.EMBEDDING_MODEL}")
             cls._model = SentenceTransformer(settings.EMBEDDING_MODEL)
-            logger.info("[OK] SentenceTransformer model successfully loaded.")
+            logger.debug("SentenceTransformer model loaded")
         return cls._model
 
     @classmethod
@@ -26,7 +26,7 @@ class EmbedderService:
             return []
         model = cls.get_model()
         # normalize_embeddings=True yields unit-length embeddings (cosine similarity = dot product)
-        embeddings = model.encode(texts, normalize_embeddings=True)
+        embeddings = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
         return embeddings.tolist()
 
     @classmethod

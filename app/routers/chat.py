@@ -216,17 +216,17 @@ async def fallback_extract_lead_from_conversation(
             {"role": "system", "content": "You are a precise data extraction assistant. Output only valid JSON."},
             {"role": "user", "content": extraction_prompt}
         ])
-        logger.info(f"[FALLBACK-EXTRACT] Raw LLM response: {raw[:500]}")
+        logger.debug(f"Fallback extraction raw response: {raw[:500]}")
         # Try to parse the JSON from the response
         extracted = extract_lead_json(raw)
         if extracted:
             # Only return if we actually found something useful
             has_any_info = any(extracted.get(k) for k in ["lead_name", "company_name", "email", "phone"])
             if has_any_info:
-                logger.info(f"[FALLBACK-EXTRACT] Successfully extracted lead info: {json.dumps(extracted)}")
+                logger.debug(f"Fallback extraction result: {json.dumps(extracted)}")
                 return extracted
             else:
-                logger.info("[FALLBACK-EXTRACT] Extraction returned but no useful fields found.")
+                logger.debug("Fallback extraction returned no useful fields")
         else:
             # Try direct JSON parse of the raw response
             try:
@@ -236,13 +236,13 @@ async def fallback_extract_lead_from_conversation(
                     raw_clean = raw_clean.rstrip('`').strip()
                 obj = json.loads(raw_clean)
                 if isinstance(obj, dict) and any(obj.get(k) for k in ["lead_name", "company_name", "email", "phone"]):
-                    logger.info(f"[FALLBACK-EXTRACT] Direct JSON parse succeeded: {json.dumps(obj)}")
+                    logger.debug(f"Fallback direct JSON parse succeeded: {json.dumps(obj)}")
                     return obj
             except (json.JSONDecodeError, Exception):
                 pass
-            logger.warning("[FALLBACK-EXTRACT] Could not parse any lead JSON from fallback response.")
+            logger.warning("Fallback lead extraction failed to parse JSON")
     except Exception as e:
-        logger.error(f"[FALLBACK-EXTRACT] Error during fallback extraction: {e}", exc_info=True)
+        logger.error(f"Fallback extraction error: {e}", exc_info=True)
 
     return None
 
@@ -278,10 +278,11 @@ async def process_post_chat(
 
     # 1. Update Lead State from LLM-extracted JSON (if any)
     if lead_json:
-        logger.info(f"[LEAD-FLOW] Extracted lead JSON from LLM: {json.dumps(lead_json)}")
+        logger.debug(f"Lead JSON extracted: {json.dumps(lead_json)}")
         # Merge new lead fields into the DB state (accumulates across turns)
         _, newly_filled = await LeadService.update_lead_state(db, conversation_id, user_id, lead_json)
-        logger.info(f"[LEAD-FLOW] Newly filled fields this turn: {newly_filled}")
+        if newly_filled:
+            logger.info(f"Lead fields collected: {list(newly_filled.keys())}")
 
         # Store Episodic Memories
         if "facts" in lead_json and isinstance(lead_json["facts"], list):
@@ -289,25 +290,24 @@ async def process_post_chat(
                 if fact and isinstance(fact, str):
                     await MemoryService.add_episodic_memory(db, user_id, fact)
     else:
-        logger.warning(f"[LEAD-FLOW] No lead JSON extracted from LLM response for session {conversation_id}")
+        logger.debug(f"No lead JSON in LLM response for session {conversation_id}")
 
     # 2. ALWAYS attempt ERP sync using the accumulated DB state
     #    This ensures lead creation even if name came in turn 1 and company in turn 2
     lead_state = await LeadService.get_or_create_lead_state(db, conversation_id, user_id)
     has_name = bool(lead_state.lead_name)
     has_company = bool(lead_state.company_name)
-    logger.info(
-        f"[LEAD-FLOW] Pre-sync state: lead_name='{lead_state.lead_name}', "
-        f"company_name='{lead_state.company_name}', email='{lead_state.email}', "
-        f"phone='{lead_state.phone}', lead_saved={lead_state.lead_saved}, "
-        f"lead_id='{lead_state.lead_id}', has_mandatory={has_name and has_company}"
+    logger.debug(
+        f"Pre-sync state: name='{lead_state.lead_name}', "
+        f"company='{lead_state.company_name}', saved={lead_state.lead_saved}, "
+        f"lead_id='{lead_state.lead_id}'"
     )
 
     try:
         sync_result = await LeadService.sync_lead_to_erpnext(db, lead_state, bool(newly_filled))
-        logger.info(f"[LEAD-FLOW] sync_lead_to_erpnext returned: {sync_result}")
+        logger.debug(f"Lead sync result: {sync_result}")
     except Exception as e:
-        logger.error(f"[LEAD-FLOW] Error syncing lead to ERPNext: {e}", exc_info=True)
+        logger.error(f"Error syncing lead to ERPNext: {e}", exc_info=True)
 
     # 3. Save User and Assistant Messages & generate vector embeddings
     await MemoryService.store_message_and_embed(db, conversation_id, user_id, "user", user_message)
@@ -318,7 +318,7 @@ async def process_post_chat(
 
     # Re-fetch lead state to get the real lead_saved status (updated by sync_lead_to_erpnext)
     await db.refresh(lead_state)
-    logger.info(f"[LEAD-FLOW] Final lead_saved status after sync: {lead_state.lead_saved}")
+    logger.debug(f"Final lead_saved={lead_state.lead_saved}")
     
     lead_data = {
         "lead_name": lead_state.lead_name,
@@ -458,14 +458,14 @@ async def chat(
 
     # FALLBACK: If LLM didn't output JSON block, extract from conversation
     if not lead_json:
-        logger.warning(f"[LEAD-FLOW] Primary JSON extraction failed for session {session_id}. Running fallback extraction...")
+        logger.debug(f"Primary JSON extraction failed for session {session_id}, running fallback")
         lead_json = await fallback_extract_lead_from_conversation(
             recent_messages, req.message, clean_reply
         )
         if lead_json:
-            logger.info(f"[LEAD-FLOW] Fallback extraction succeeded: {json.dumps(lead_json)}")
+            logger.debug(f"Fallback extraction succeeded: {json.dumps(lead_json)}")
         else:
-            logger.warning(f"[LEAD-FLOW] Fallback extraction also failed for session {session_id}")
+            logger.warning(f"Lead JSON extraction failed for session {session_id}")
 
     lead_data, lead_just_saved = await process_post_chat(
         db=db,
@@ -607,14 +607,14 @@ async def chat_stream(
 
         # FALLBACK: If LLM didn't output JSON block, extract from conversation
         if not lead_json:
-            logger.warning(f"[LEAD-FLOW] Primary JSON extraction failed for stream session {session_id}. Running fallback extraction...")
+            logger.debug(f"Primary JSON extraction failed for stream session {session_id}, running fallback")
             lead_json = await fallback_extract_lead_from_conversation(
                 recent_messages, req.message, clean_reply
             )
             if lead_json:
-                logger.info(f"[LEAD-FLOW] Fallback extraction succeeded for stream: {json.dumps(lead_json)}")
+                logger.debug(f"Fallback extraction succeeded for stream: {json.dumps(lead_json)}")
             else:
-                logger.warning(f"[LEAD-FLOW] Fallback extraction also failed for stream session {session_id}")
+                logger.warning(f"Lead JSON extraction failed for stream session {session_id}")
 
         # Update DB state, sync leads, save message logs, run compression
         lead_data, lead_just_saved = await process_post_chat(

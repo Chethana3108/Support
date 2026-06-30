@@ -11,9 +11,9 @@ class RerankerService:
     def get_model(cls) -> CrossEncoder:
         """Lazy load the CrossEncoder model to optimize startup memory."""
         if cls._model is None:
-            logger.info("Loading CrossEncoder model: cross-encoder/ms-marco-MiniLM-L-6-v2...")
+            logger.debug("Loading CrossEncoder model: cross-encoder/ms-marco-MiniLM-L-6-v2")
             cls._model = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-            logger.info("[OK] CrossEncoder model successfully loaded.")
+            logger.debug("CrossEncoder model loaded")
         return cls._model
 
     @classmethod
@@ -40,7 +40,7 @@ class RerankerService:
         
         # Predict similarity scores
         # ms-marco-MiniLM outputs a raw logit score where higher is more relevant.
-        scores = model.predict(pairs)
+        scores = model.predict(pairs, show_progress_bar=False)
         
         # Attach scores to the candidate dicts
         for item, score in zip(items, scores):
@@ -49,5 +49,5 @@ class RerankerService:
         # Sort descending by rerank score
         reranked = sorted(items, key=lambda x: x["rerank_score"], reverse=True)
         
-        logger.info(f"Reranked {len(items)} candidates down to top {min(top_k, len(reranked))}")
+        logger.debug(f"Reranked {len(items)} candidates down to top {min(top_k, len(reranked))}")
         return reranked[:top_k]

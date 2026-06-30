@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Optional, Set
 from sqlalchemy import select, desc, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import User, Conversation, Message, MemoryEmbedding, UserEpisodicMemory
@@ -23,7 +23,7 @@ class MemoryService:
             user = User(user_id=user_id)
             db.add(user)
             await db.commit()
-            logger.info(f"Created new user account: {user_id}")
+            logger.debug(f"Created new user account: {user_id}")
         return user
 
     @classmethod
@@ -44,7 +44,7 @@ class MemoryService:
             conversation = Conversation(conversation_id=conversation_id, user_id=user_id)
             db.add(conversation)
             await db.commit()
-            logger.info(f"Created new conversation session: {conversation_id} (linked to user: {user_id})")
+            logger.debug(f"Created new conversation session: {conversation_id} (user: {user_id})")
         return conversation
 
     @staticmethod
@@ -105,9 +105,9 @@ class MemoryService:
         user_id: str,
         query: str,
         recent_message_ids: Set[uuid.UUID],
-        candidate_k: int = None,
-        final_k: int = None,
-        threshold: float = None
+        candidate_k: Optional[int] = None,
+        final_k: Optional[int] = None,
+        threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """
         Search historical conversation memory *across all conversations* of this user.
@@ -173,7 +173,7 @@ class MemoryService:
         user_id: str,
         query: str,
         top_k: int = 5,
-        threshold: float = None
+        threshold: Optional[float] = None
     ) -> List[Dict[str, Any]]:
         """Retrieve relevant episodic memory summaries for the user."""
         if threshold is None:
@@ -228,7 +228,7 @@ class MemoryService:
         existing = result.scalar_one_or_none()
 
         if existing:
-            logger.info(f"Episodic fact already exists, skipping: '{fact_clean}'")
+            logger.debug(f"Episodic fact already exists, skipping: '{fact_clean}'")
             return
 
         # Insert new episodic memory
@@ -239,7 +239,7 @@ class MemoryService:
         )
         db.add(new_memory)
         await db.commit()
-        logger.info(f"[OK] Saved new episodic fact for user {user_id}: '{fact_clean}'")
+        logger.debug(f"Saved episodic fact for user {user_id}: '{fact_clean}'")
 
     @classmethod
     async def compress_conversation(cls, db: AsyncSession, conversation_id: str):
