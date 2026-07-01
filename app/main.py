@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import sys
 import time
@@ -76,7 +77,28 @@ async def lifespan(app: FastAPI):
     RerankerService.get_model()
     logger.info("ML models loaded — ready to serve requests")
     
+    # Start background crawler scheduler (auto-syncs website content)
+    crawler_task = None
+    try:
+        from scripts.scheduler import scheduler_loop
+        crawler_task = asyncio.create_task(
+            scheduler_loop(initial_delay_seconds=60),
+            name="crawler_scheduler"
+        )
+        logger.info("Background crawler scheduler started (first sync in 60s)")
+    except Exception as e:
+        logger.error(f"Failed to start crawler scheduler: {e}")
+    
     yield
+    
+    # Shutdown: cancel the crawler background task
+    if crawler_task and not crawler_task.done():
+        crawler_task.cancel()
+        try:
+            await crawler_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Crawler scheduler stopped")
     
     logger.info("Shutting down — closing DB pool")
     await engine.dispose()

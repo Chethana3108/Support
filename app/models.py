@@ -111,3 +111,12 @@ class WebsiteChunk(Base):
     # Vector of 384 dimensions matching sentence-transformers/all-MiniLM-L6-v2
     embedding: Mapped[Vector] = mapped_column(Vector(384), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utc_now)
+
+
+class CrawlState(Base):
+    __tablename__ = "crawl_state"
+
+    url: Mapped[str] = mapped_column(String, primary_key=True)
+    content_hash: Mapped[str] = mapped_column(String, nullable=False)
+    last_crawled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utc_now)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active")

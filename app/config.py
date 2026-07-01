@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 100
     
+    # Crawler Settings
+    CRAWL_BASE_URL: str = "https://beta.biztechnosys.com/"
+    CRAWL_INTERVAL_HOURS: int = 6
+    CRAWL_MAX_PAGES: int = 500
+    CRAWL_MAX_DEPTH: int = 10
+    CRAWL_CONCURRENT_WORKERS: int = 5
+    
     # RAG Search Tuning
     TOP_K_KNOWLEDGE: int = 20  # Fetch more candidates for reranking
     TOP_K_MEMORY: int = 20     # Fetch more candidates for reranking

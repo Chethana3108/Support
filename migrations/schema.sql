@@ -71,6 +71,14 @@ CREATE TABLE IF NOT EXISTS website_chunks (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Crawl State table (tracks per-URL crawl metadata for incremental sync)
+CREATE TABLE IF NOT EXISTS crawl_state (
+    url TEXT PRIMARY KEY,
+    content_hash TEXT NOT NULL,
+    last_crawled_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'active'
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations (user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
