@@ -222,7 +222,7 @@ class LeadService:
                     if existing_lead_id and existing_lead_id != lead_state.lead_id:
                         logger.info(
                             f"Late identity match found in ERPNext: "
-                            f"switching lead ID {lead_state.lead_id} → {existing_lead_id}. "
+                            f"switching lead ID {lead_state.lead_id} -> {existing_lead_id}. "
                             f"Deleting temporary duplicate lead."
                         )
                         # Deleting the temporary duplicate lead from ERPNext

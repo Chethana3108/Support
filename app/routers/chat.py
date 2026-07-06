@@ -178,7 +178,7 @@ def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
         return None
     field_clean = field_name.strip().lower()
     
-    if field_clean in ("lead_name", "name"):
+    if field_clean in ("lead_name", "name", "full_name", "fullname", "first_name", "last_name", "client_name", "visitor_name", "customer_name"):
         return {
             "field": "lead_name",
             "input_type": "text",
@@ -186,7 +186,7 @@ def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
             "placeholder": "Your Full Name",
             "required": True
         }
-    elif field_clean in ("company_name", "company", "org", "organization"):
+    elif field_clean in ("company_name", "company", "org", "organization", "business", "firm", "companyname", "org_name", "organization_name"):
         return {
             "field": "company_name",
             "input_type": "text",
@@ -194,7 +194,7 @@ def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
             "placeholder": "Company Name",
             "required": True
         }
-    elif field_clean == "email":
+    elif field_clean in ("email", "email_address", "mail", "emailaddress"):
         return {
             "field": "email",
             "input_type": "email",
@@ -202,7 +202,7 @@ def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
             "placeholder": "Enter your email",
             "required": True
         }
-    elif field_clean in ("phone", "tel", "phone_number"):
+    elif field_clean in ("phone", "tel", "phone_number", "telephone", "mobile", "contact", "contact_number", "phonenumber"):
         return {
             "field": "phone",
             "input_type": "tel",
@@ -211,6 +211,85 @@ def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
             "required": True
         }
     return None
+
+
+def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
+    """Validate that the assistant's reply is *explicitly asking* for the given field.
+    
+    Uses strict regex phrase patterns so that generic mentions of words like
+    'name', 'company', or 'call' in unrelated contexts do NOT trigger
+    expected_input.  Only explicit questions directed at the user will match.
+    """
+    if not mapped or not reply:
+        return False
+    field = mapped.get("field")
+    reply_lower = reply.lower()
+
+    # Each pattern list contains regex phrases that indicate the bot is
+    # explicitly requesting that piece of information from the user.
+    if field == "lead_name":
+        patterns = [
+            r"\byour\s+(?:good\s+)?name\b",
+            r"\bmay\s+i\s+(?:know|have)\s+your\s+name\b",
+            r"\bwhat(?:'s|\s+is)\s+your\s+name\b",
+            r"\bwho\s+(?:am\s+i\s+speaking|is\s+this)\b",
+            r"\bhow\s+(?:should|shall|can|may)\s+i\s+(?:address|call)\s+you\b",
+            r"\bintroduce\s+yourself\b",
+            r"\bwhat\s+(?:should|shall|can|may)\s+i\s+call\s+you\b",
+            r"\bcould\s+(?:you\s+)?(?:share|tell\s+me)\s+your\s+name\b",
+            r"\bi(?:'d|\s+would)\s+love\s+to\s+know\s+your\s+name\b",
+            r"\bpersonalize\b.*\byour\s+name\b",
+            r"\bknow\s+your\s+name\b",
+        ]
+        return any(re.search(p, reply_lower) for p in patterns)
+
+    elif field == "company_name":
+        patterns = [
+            r"\bwhich\s+(?:organization|company|firm|business)\b",
+            r"\bwhat(?:'s|\s+is)\s+your\s+(?:organization|company|firm)\b",
+            r"\bwhat\s+(?:organization|company|firm)\b.*\b(?:are\s+you|do\s+you)\b",
+            r"\bwh(?:ich|at)\s+(?:organization|company|firm)\s+(?:are\s+you|do\s+you)\b",
+            r"\byou\s+(?:associated|affiliated)\s+with\b",
+            r"\bwhere\s+do\s+you\s+work\b",
+            r"\bwho\s+do\s+you\s+(?:work\s+for|represent)\b",
+            r"\byou\s+work\s+(?:for|at|with)\b.*\?",
+            r"\byour\s+(?:organization|company|firm|business)\b.*\?",
+            r"\bcould\s+(?:you\s+)?(?:share|tell\s+me)\s+(?:your\s+)?(?:organization|company)\b",
+            r"\bknow\s+(?:your|which)\s+(?:organization|company)\b",
+        ]
+        return any(re.search(p, reply_lower) for p in patterns)
+
+    elif field == "email":
+        patterns = [
+            r"\byour\s+(?:email|e-mail)\b",
+            r"\bwhat(?:'s|\s+is)\s+your\s+(?:email|e-mail)\b",
+            r"\bshare\s+(?:your\s+)?(?:email|e-mail)\b",
+            r"\bbest\s+(?:email|e-mail)\s+to\s+reach\b",
+            r"\bemail\s+(?:address|id)\b.*\?",
+            r"\bsend\s+(?:you|it|details|info|proposal|brochure)\b.*\b(?:email|e-mail|inbox)\b",
+            r"\b(?:email|e-mail)\b.*\bsend\b.*\?",
+            r"\breach\s+you\b.*\b(?:email|e-mail)\b",
+            r"\b(?:email|e-mail)\b.*\breach\s+you\b",
+            r"\bcould\s+(?:you\s+)?(?:share|provide)\s+(?:your\s+)?(?:email|e-mail)\b",
+        ]
+        return any(re.search(p, reply_lower) for p in patterns)
+
+    elif field == "phone":
+        patterns = [
+            r"\byour\s+(?:phone|mobile|contact|cell)\s*(?:number)?\b.*\?",
+            r"\bwhat(?:'s|\s+is)\s+(?:your\s+)?(?:phone|mobile|contact)\s*(?:number)?\b",
+            r"\bshare\s+(?:your\s+)?(?:phone|mobile|contact)\s*(?:number)?\b",
+            r"\bgood\s+(?:number|phone)\s+to\s+(?:reach|call|contact)\b",
+            r"\bcall\s+you\b.*\b(?:number|phone|mobile)\b",
+            r"\b(?:number|phone|mobile)\b.*\bcall\s+you\b",
+            r"\bour\s+(?:expert|team|consultant)\s+(?:to\s+)?call\s+you\b",
+            r"\bgive\s+(?:you|them)\s+a\s+call\b.*\b(?:number|phone)\b",
+            r"\bwould\s+you\s+like\s+(?:a\s+)?call\b",
+            r"\bcould\s+(?:you\s+)?(?:share|provide)\s+(?:your\s+)?(?:phone|mobile|contact)\b",
+        ]
+        return any(re.search(p, reply_lower) for p in patterns)
+
+    return False
 
 
 async def fallback_extract_lead_from_conversation(
@@ -266,8 +345,9 @@ async def fallback_extract_lead_from_conversation(
         # Try to parse the JSON from the response
         extracted = extract_lead_json(raw)
         if extracted:
-            # Only return if we actually found something useful
-            has_any_info = any(extracted.get(k) for k in ["lead_name", "company_name", "email", "phone"])
+            # Only return if we actually found something useful (either contact details or expected input field name)
+            has_expected_input = bool(extracted.get("expected_input") and str(extracted.get("expected_input")).strip().lower() != "null")
+            has_any_info = any(extracted.get(k) for k in ["lead_name", "company_name", "email", "phone"]) or has_expected_input
             if has_any_info:
                 logger.debug(f"Fallback extraction result: {json.dumps(extracted)}")
                 return extracted
@@ -281,9 +361,11 @@ async def fallback_extract_lead_from_conversation(
                     raw_clean = re.sub(r'```(?:json)?\s*', '', raw_clean)
                     raw_clean = raw_clean.rstrip('`').strip()
                 obj = json.loads(raw_clean)
-                if isinstance(obj, dict) and any(obj.get(k) for k in ["lead_name", "company_name", "email", "phone"]):
-                    logger.debug(f"Fallback direct JSON parse succeeded: {json.dumps(obj)}")
-                    return obj
+                if isinstance(obj, dict):
+                    has_expected_input_obj = bool(obj.get("expected_input") and str(obj.get("expected_input")).strip().lower() != "null")
+                    if any(obj.get(k) for k in ["lead_name", "company_name", "email", "phone"]) or has_expected_input_obj:
+                        logger.debug(f"Fallback direct JSON parse succeeded: {json.dumps(obj)}")
+                        return obj
             except (json.JSONDecodeError, Exception):
                 pass
             logger.warning("Fallback lead extraction failed to parse JSON")
@@ -363,7 +445,7 @@ async def process_post_chat(
                 )
                 if was_merged:
                     logger.info(
-                        f"User identity resolved: {user_id} → {resolved_user_id} "
+                        f"User identity resolved: {user_id} -> {resolved_user_id} "
                         f"(sessions merged)"
                     )
                     # Use the resolved user_id for all subsequent operations
@@ -576,9 +658,15 @@ async def chat(
     # Map expected input
     expected_input_data = None
     if lead_json and lead_json.get("expected_input"):
-        mapped = map_expected_input(lead_json["expected_input"])
-        if mapped:
-            expected_input_data = ExpectedInputSchema(**mapped)
+        # Double check turn rules & ensure assistant reply actually asks for this field
+        stmt = select(Message).where(Message.conversation_id == session_id, Message.role == "user")
+        user_msg_result = await db.execute(stmt)
+        user_msg_count = len(user_msg_result.scalars().all()) + 1
+        
+        if user_msg_count > settings.MINDFUL_TALK_TURNS:
+            mapped = map_expected_input(lead_json["expected_input"])
+            if mapped and validate_expected_input(mapped, clean_reply):
+                expected_input_data = ExpectedInputSchema(**mapped)
 
     return ChatResponse(
         reply=clean_reply,
@@ -735,7 +823,15 @@ async def chat_stream(
         # Map expected input
         expected_input_data = None
         if lead_json and lead_json.get("expected_input"):
-            expected_input_data = map_expected_input(lead_json["expected_input"])
+            # Double check turn rules & ensure assistant reply actually asks for this field
+            stmt = select(Message).where(Message.conversation_id == session_id, Message.role == "user")
+            user_msg_result = await db.execute(stmt)
+            user_msg_count = len(user_msg_result.scalars().all()) + 1
+            
+            if user_msg_count > settings.MINDFUL_TALK_TURNS:
+                mapped = map_expected_input(lead_json["expected_input"])
+                if mapped and validate_expected_input(mapped, clean_reply):
+                    expected_input_data = mapped
 
         # Send final metadata event (use resolved_user_id so frontend updates its stored identity)
         metadata = {

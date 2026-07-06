@@ -56,7 +56,7 @@ class UserIdentityService:
         This is the core operation that unifies sessions across devices.
         """
         logger.info(
-            f"Merging user {source_user_id} → {target_user_id} "
+            f"Merging user {source_user_id} -> {target_user_id} "
             f"(reassigning conversations, memories, episodic facts)"
         )
 
@@ -89,7 +89,7 @@ class UserIdentityService:
             await db.delete(source_user)
 
         await db.commit()
-        logger.info(f"User merge complete: {source_user_id} → {target_user_id}")
+        logger.info(f"User merge complete: {source_user_id} -> {target_user_id}")
 
     @classmethod
     async def resolve_user_identity(
@@ -138,7 +138,7 @@ class UserIdentityService:
             # Found a different existing user with this email/phone → MERGE
             logger.info(
                 f"Identity match found by {matched_by}: "
-                f"merging anonymous user {current_user_id} → known user {existing_user.user_id}"
+                f"merging anonymous user {current_user_id} -> known user {existing_user.user_id}"
             )
             await cls.merge_users(db, source_user_id=current_user_id, target_user_id=existing_user.user_id)
 
