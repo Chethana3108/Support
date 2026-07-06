@@ -73,7 +73,7 @@ Rules for filling this JSON:
 - "company_name": Their organization. If they said "I work at Pfizer" or "We are from Google", put that here.
 - "email": Their email address if shared. Use "" if not yet collected.
 - "phone": Their phone number if shared. Use "" if not yet collected.
-- "notes": Brief summary of what the user is looking for / their requirements.
+- "notes": Brief summary of what the user is looking for / their requirements. Once notes are created (when lead is ready with name and company), DO NOT change, rewrite, or update them in subsequent turns; keep the exact same text.
 - "ready": Set to true when you have BOTH lead_name AND company_name. Otherwise false.
 - "facts": List of 1-3 new core user facts learned this turn.
 

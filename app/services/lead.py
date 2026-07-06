@@ -86,10 +86,21 @@ class LeadService:
             
             if val:
                 existing_val = getattr(lead_state, key)
+                if isinstance(existing_val, str):
+                    existing_val = existing_val.strip()
+                
                 if not existing_val:
+                    if key == "notes":
+                        # Only set notes if the lead has both name and company name (is ready)
+                        is_ready_for_notes = bool(lead_state.lead_name) and bool(lead_state.company_name)
+                        if not is_ready_for_notes:
+                            continue
                     setattr(lead_state, key, val)
                     newly_filled[key] = val
                 elif existing_val != val:
+                    if key == "notes":
+                        # Once notes are set, do not overwrite/update them
+                        continue
                     setattr(lead_state, key, val)
                     newly_filled[key] = val
         
@@ -198,12 +209,41 @@ class LeadService:
         # ── PATH 2: Lead ALREADY saved → UPDATE with newly collected fields ──
         elif lead_state.lead_saved and lead_state.lead_id and newly_filled:
             try:
-                result = await ERPNextService.update_lead(lead_state.lead_id, lead_dict)
+                # If email or phone is set, check if they belong to an existing lead in ERPNext
+                # that is different from our current lead_state.lead_id
+                target_lead_id = lead_state.lead_id
+                if lead_state.email or lead_state.phone:
+                    existing_lead_id = None
+                    if lead_state.email:
+                        existing_lead_id = await ERPNextService.get_lead_by_email(lead_state.email)
+                    if not existing_lead_id and lead_state.phone:
+                        existing_lead_id = await ERPNextService.get_lead_by_phone(lead_state.phone)
+                    
+                    if existing_lead_id and existing_lead_id != lead_state.lead_id:
+                        logger.info(
+                            f"Late identity match found in ERPNext: "
+                            f"switching lead ID {lead_state.lead_id} → {existing_lead_id}. "
+                            f"Deleting temporary duplicate lead."
+                        )
+                        # Deleting the temporary duplicate lead from ERPNext
+                        temp_lead_id = lead_state.lead_id
+                        try:
+                            await ERPNextService.delete_lead(temp_lead_id)
+                            logger.info(f"Deleted temporary duplicate lead {temp_lead_id} from ERPNext")
+                        except Exception as del_err:
+                            logger.warning(f"Failed to delete temporary duplicate lead {temp_lead_id}: {del_err}")
+
+                        # Update our local database to point to the correct lead_id
+                        lead_state.lead_id = existing_lead_id
+                        await db.commit()
+                        target_lead_id = existing_lead_id
+
+                result = await ERPNextService.update_lead(target_lead_id, lead_dict)
                 if result.get("success"):
-                    logger.info(f"Lead updated: {lead_state.lead_id}")
+                    logger.info(f"Lead updated: {target_lead_id}")
                     return True
                 else:
-                    logger.error(f"Failed to update lead {lead_state.lead_id}: {result}")
+                    logger.error(f"Failed to update lead {target_lead_id}: {result}")
             except Exception as e:
                 logger.error(f"Failed to update lead {lead_state.lead_id}: {e}", exc_info=True)
         else:

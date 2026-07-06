@@ -1,6 +1,7 @@
 import json
 import logging
 from typing import Optional, Dict, Any
+from datetime import datetime
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from app.config import settings
@@ -146,8 +147,10 @@ class ERPNextService:
         truly mandatory for ERPNext; email, phone, and company are optional.
         """
         full_notes = lead_data.get("notes", "")
-        # Truncating job title if it exists to fit constraints, keeping the notes logic
-        truncated_job_title = full_notes[:135] if full_notes else ""
+        formatted_note = ""
+        if full_notes:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            formatted_note = f"[{timestamp}] {full_notes}"
 
         payload = {
             "doctype": "Lead",
@@ -155,7 +158,7 @@ class ERPNextService:
             "email_id": lead_data.get("email", ""),
             "mobile_no": lead_data.get("phone", ""),
             "company_name": lead_data.get("company_name", ""),
-            "custom_bot_service": truncated_job_title,
+            "custom_bot_service": formatted_note,
             "source": "Bot",
         }
         if full_notes:
@@ -204,7 +207,37 @@ class ERPNextService:
     async def update_lead(cls, lead_id: str, lead_data: Dict[str, Any]) -> Dict[str, Any]:
         """Update an existing Lead in ERPNext."""
         full_notes = lead_data.get("notes", "")
-        truncated_job_title = full_notes[:135] if full_notes else ""
+        headers = cls._get_headers()
+
+        # Fetch existing lead's custom_bot_service value
+        existing_custom_bot_service = ""
+        async with httpx.AsyncClient(timeout=10, verify=settings.ERPNEXT_SSL_VERIFY) as client:
+            try:
+                resp = await client.get(
+                    f"{settings.ERPNEXT_URL}/api/resource/Lead/{lead_id}",
+                    headers=headers,
+                )
+                if resp.status_code == 200:
+                    lead_details = resp.json().get("data", {})
+                    existing_custom_bot_service = lead_details.get("custom_bot_service") or ""
+            except Exception as e:
+                logger.error(f"Error fetching existing lead details for {lead_id} from ERPNext: {e}")
+
+        # Determine the updated custom_bot_service value
+        if full_notes:
+            clean_note = full_notes.strip()
+            # If the new note is already a substring of the existing notes, do not append
+            if clean_note and clean_note not in existing_custom_bot_service:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                new_entry = f"[{timestamp}] {full_notes}"
+                if existing_custom_bot_service:
+                    updated_custom_bot_service = f"{existing_custom_bot_service}\n{new_entry}"
+                else:
+                    updated_custom_bot_service = new_entry
+            else:
+                updated_custom_bot_service = existing_custom_bot_service
+        else:
+            updated_custom_bot_service = existing_custom_bot_service
 
         payload = {
             "doctype": "Lead",
@@ -212,7 +245,7 @@ class ERPNextService:
             "email_id": lead_data.get("email", ""),
             "mobile_no": lead_data.get("phone", ""),
             "company_name": lead_data.get("company_name", ""),
-            "custom_bot_service": truncated_job_title,
+            "custom_bot_service": updated_custom_bot_service,
             "source": "Bot",
         }
         if full_notes:
@@ -220,7 +253,6 @@ class ERPNextService:
 
         # Strip out empty fields
         payload = {k: v for k, v in payload.items() if v}
-        headers = cls._get_headers()
 
         async with httpx.AsyncClient(timeout=15, verify=settings.ERPNEXT_SSL_VERIFY) as client:
             try:
@@ -237,4 +269,30 @@ class ERPNextService:
                 raise
             except Exception as e:
                 logger.error(f"ERPNext lead update error: {e}")
+                raise
+
+    @classmethod
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(is_retryable_error),
+        reraise=True,
+    )
+    async def delete_lead(cls, lead_id: str) -> Dict[str, Any]:
+        """Delete a Lead from ERPNext."""
+        headers = cls._get_headers()
+        async with httpx.AsyncClient(timeout=15, verify=settings.ERPNEXT_SSL_VERIFY) as client:
+            try:
+                resp = await client.delete(
+                    f"{settings.ERPNEXT_URL}/api/resource/Lead/{lead_id}",
+                    headers=headers,
+                )
+                resp.raise_for_status()
+                logger.debug(f"ERPNext lead deletion success: {resp.status_code}")
+                return {"success": resp.status_code in (200, 202, 204), "detail": resp.text}
+            except httpx.HTTPStatusError as e:
+                logger.error(f"ERPNext lead deletion failed with {e.response.status_code}: {e.response.text}")
+                raise
+            except Exception as e:
+                logger.error(f"ERPNext lead deletion error: {e}")
                 raise
