@@ -19,6 +19,7 @@ from app.services.knowledge import KnowledgeService
 from app.services.memory import MemoryService
 from app.services.lead import LeadService
 from app.services.llm import call_deepseek
+from app.services.user_identity import UserIdentityService
 
 logger = logging.getLogger("biztechbot")
 
@@ -272,9 +273,17 @@ async def process_post_chat(
     assistant_reply: str,
     lead_json: Optional[Dict[str, Any]],
     background_tasks: BackgroundTasks
-) -> tuple[Dict[str, Any], bool]:
-    """Handles post-response DB updates, episodic memory storage, and ERPNext syncing."""
+) -> tuple[Dict[str, Any], bool, str]:
+    """Handles post-response DB updates, episodic memory storage, ERPNext syncing,
+    and user identity resolution.
+    
+    Returns:
+        Tuple of (lead_data dict, lead_saved bool, resolved_user_id str)
+        The resolved_user_id may differ from the input user_id if the user was
+        identified as an existing known user and sessions were merged.
+    """
     newly_filled = {}
+    resolved_user_id = user_id
 
     # 1. Update Lead State from LLM-extracted JSON (if any)
     if lead_json:
@@ -284,7 +293,31 @@ async def process_post_chat(
         if newly_filled:
             logger.info(f"Lead fields collected: {list(newly_filled.keys())}")
 
-        # Store Episodic Memories
+        # 1b. IDENTITY RESOLUTION: If email or phone was newly collected,
+        #     check if this anonymous user is actually a known user
+        collected_email = newly_filled.get("email") or (lead_json.get("email") if lead_json else None)
+        collected_phone = newly_filled.get("phone") or (lead_json.get("phone") if lead_json else None)
+
+        if collected_email or collected_phone:
+            try:
+                resolved_user_id, was_merged = await UserIdentityService.resolve_user_identity(
+                    db=db,
+                    current_user_id=user_id,
+                    email=collected_email,
+                    phone=collected_phone
+                )
+                if was_merged:
+                    logger.info(
+                        f"User identity resolved: {user_id} → {resolved_user_id} "
+                        f"(sessions merged)"
+                    )
+                    # Use the resolved user_id for all subsequent operations
+                    user_id = resolved_user_id
+            except Exception as e:
+                logger.error(f"Error resolving user identity: {e}", exc_info=True)
+                # Non-fatal: continue with original user_id
+
+        # Store Episodic Memories (using resolved user_id)
         if "facts" in lead_json and isinstance(lead_json["facts"], list):
             for fact in lead_json["facts"]:
                 if fact and isinstance(fact, str):
@@ -328,7 +361,7 @@ async def process_post_chat(
         "notes": lead_state.notes,
     }
 
-    return lead_data, lead_state.lead_saved
+    return lead_data, lead_state.lead_saved, resolved_user_id
 
 async def build_dynamic_prompt(
     db: AsyncSession,
@@ -467,7 +500,7 @@ async def chat(
         else:
             logger.warning(f"Lead JSON extraction failed for session {session_id}")
 
-    lead_data, lead_just_saved = await process_post_chat(
+    lead_data, lead_just_saved, resolved_user_id = await process_post_chat(
         db=db,
         conversation_id=session_id,
         user_id=user_id,
@@ -488,7 +521,7 @@ async def chat(
     return ChatResponse(
         reply=clean_reply,
         session_id=session_id,
-        user_id=user_id,
+        user_id=resolved_user_id,
         sources=sources[:3],
         lead_collected=LeadStateSchema(**lead_data),
         lead_saved=lead_just_saved
@@ -617,7 +650,7 @@ async def chat_stream(
                 logger.warning(f"Lead JSON extraction failed for stream session {session_id}")
 
         # Update DB state, sync leads, save message logs, run compression
-        lead_data, lead_just_saved = await process_post_chat(
+        lead_data, lead_just_saved, resolved_user_id = await process_post_chat(
             db=db,
             conversation_id=session_id,
             user_id=user_id,
@@ -635,11 +668,11 @@ async def chat_stream(
                 sources.append({"title": r["title"], "url": r["url"], "score": round(r["score"], 3)})
                 seen_urls.add(r["url"])
 
-        # Send final metadata event
+        # Send final metadata event (use resolved_user_id so frontend updates its stored identity)
         metadata = {
             "type": "metadata",
             "session_id": session_id,
-            "user_id": user_id,
+            "user_id": resolved_user_id,
             "sources": sources[:3],
             "lead": lead_data,
             "lead_saved": lead_just_saved

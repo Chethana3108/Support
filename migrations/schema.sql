@@ -8,7 +8,9 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
     email TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    phone TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Conversations table
@@ -84,6 +86,13 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations (user_id);
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_memory_embeddings_user_id ON memory_embeddings (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_episodic_memories_user_id ON user_episodic_memories (user_id);
+
+-- Unique partial indexes for user identity deduplication
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique 
+  ON users (email) WHERE email IS NOT NULL AND email != '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone_unique 
+  ON users (phone) WHERE phone IS NOT NULL AND phone != '';
 
 -- Vector Indexes (HNSW for fast cosine similarity search)
 CREATE INDEX IF NOT EXISTS idx_website_chunks_embedding_hnsw 

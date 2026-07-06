@@ -140,12 +140,15 @@ class LeadService:
                 f"Attempting to create/find lead for session {lead_state.conversation_id}"
             )
             
-            # Try to find existing lead: first by email, then by name+company
+            # Try to find existing lead: email → phone → name+company
             existing_lead_id = None
             try:
                 if lead_state.email:
                     existing_lead_id = await ERPNextService.get_lead_by_email(lead_state.email)
                     logger.debug(f"Search by email result: {existing_lead_id}")
+                if not existing_lead_id and lead_state.phone:
+                    existing_lead_id = await ERPNextService.get_lead_by_phone(lead_state.phone)
+                    logger.debug(f"Search by phone result: {existing_lead_id}")
                 if not existing_lead_id:
                     existing_lead_id = await ERPNextService.get_lead_by_name_and_company(
                         lead_state.lead_name, lead_state.company_name

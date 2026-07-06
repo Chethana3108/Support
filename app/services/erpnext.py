@@ -64,6 +64,42 @@ class ERPNextService:
         retry=retry_if_exception(is_retryable_error),
         reraise=True,
     )
+    async def get_lead_by_phone(cls, phone: str) -> Optional[str]:
+        """Search for an existing Lead by mobile number in ERPNext. Returns the lead ID/name if found."""
+        if not phone:
+            return None
+
+        headers = cls._get_headers()
+        params = {
+            "filters": json.dumps([["mobile_no", "=", phone]])
+        }
+        
+        async with httpx.AsyncClient(timeout=10, verify=settings.ERPNEXT_SSL_VERIFY) as client:
+            try:
+                resp = await client.get(
+                    f"{settings.ERPNEXT_URL}/api/resource/Lead",
+                    headers=headers,
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json().get("data", [])
+                if data:
+                    return data[0].get("name")
+            except httpx.HTTPStatusError as e:
+                logger.error(f"ERPNext query status error {e.response.status_code}: {e.response.text}")
+                raise
+            except Exception as e:
+                logger.error(f"Error querying ERPNext lead by phone: {e}")
+                raise
+        return None
+
+    @classmethod
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception(is_retryable_error),
+        reraise=True,
+    )
     async def get_lead_by_name_and_company(cls, lead_name: str, company_name: str) -> Optional[str]:
         """Search for an existing Lead by first_name + company_name in ERPNext. Returns the lead ID/name if found."""
         if not lead_name or not company_name:
