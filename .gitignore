@@ -126,6 +126,8 @@ active_env/
 # .env.local
 # .env.*.local
 
+main.py
+
 # Local Log files
 *.log
 server_stdout.log
