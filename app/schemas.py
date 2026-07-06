@@ -18,6 +18,13 @@ class LeadStateSchema(BaseModel):
     phone: str = ""
     notes: str = ""
 
+class ExpectedInputSchema(BaseModel):
+    field: str
+    input_type: str
+    label: str
+    placeholder: str
+    required: bool
+
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
@@ -25,3 +32,5 @@ class ChatResponse(BaseModel):
     sources: List[SourceInfo] = []
     lead_collected: LeadStateSchema
     lead_saved: bool = False
+    expected_input: Optional[ExpectedInputSchema] = None
+

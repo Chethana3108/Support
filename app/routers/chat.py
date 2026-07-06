@@ -14,7 +14,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.database import get_db, AsyncSessionLocal
 from app.models import Message, Conversation
-from app.schemas import ChatRequest, ChatResponse, SourceInfo, LeadStateSchema
+from app.schemas import ChatRequest, ChatResponse, SourceInfo, LeadStateSchema, ExpectedInputSchema
 from app.services.knowledge import KnowledgeService
 from app.services.memory import MemoryService
 from app.services.lead import LeadService
@@ -65,7 +65,7 @@ If the user has mentioned their name or company at ANY point in the conversation
 
 Format — output EXACTLY this structure on its own line at the very end:
 ```json
-{"lead_name":"...","email":"...","phone":"...","company_name":"...","notes":"...","ready":true/false,"facts":["..."]}
+{"lead_name":"...","email":"...","phone":"...","company_name":"...","notes":"...","ready":true/false,"facts":["..."],"expected_input":"lead_name" | "company_name" | "email" | "phone" | null}
 ```
 
 Rules for filling this JSON:
@@ -76,6 +76,8 @@ Rules for filling this JSON:
 - "notes": Brief summary of what the user is looking for / their requirements. Once notes are created (when lead is ready with name and company), DO NOT change, rewrite, or update them in subsequent turns; keep the exact same text.
 - "ready": Set to true when you have BOTH lead_name AND company_name. Otherwise false.
 - "facts": List of 1-3 new core user facts learned this turn.
+- "expected_input": The field you are explicitly asking the user for in this response (must be one of: "lead_name", "company_name", "email", "phone"). If you are not asking the user for any of these contact details in this turn, set this to null.
+
 
 ⚠️ CRITICAL: If the user has ALREADY shared their name or company in a PREVIOUS message in the conversation,
 you MUST still include those values in the JSON block. Do NOT leave them blank just because they were
@@ -171,6 +173,46 @@ def extract_lead_json(text: str) -> Optional[dict]:
     return None
 
 
+def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
+    if not field_name:
+        return None
+    field_clean = field_name.strip().lower()
+    
+    if field_clean in ("lead_name", "name"):
+        return {
+            "field": "lead_name",
+            "input_type": "text",
+            "label": "Full Name",
+            "placeholder": "Your Full Name",
+            "required": True
+        }
+    elif field_clean in ("company_name", "company", "org", "organization"):
+        return {
+            "field": "company_name",
+            "input_type": "text",
+            "label": "Organization",
+            "placeholder": "Company Name",
+            "required": True
+        }
+    elif field_clean == "email":
+        return {
+            "field": "email",
+            "input_type": "email",
+            "label": "Email Address",
+            "placeholder": "Enter your email",
+            "required": True
+        }
+    elif field_clean in ("phone", "tel", "phone_number"):
+        return {
+            "field": "phone",
+            "input_type": "tel",
+            "label": "Phone Number",
+            "placeholder": "Enter your phone number",
+            "required": True
+        }
+    return None
+
+
 async def fallback_extract_lead_from_conversation(
     recent_messages: List[Any],
     current_user_message: str,
@@ -191,24 +233,27 @@ async def fallback_extract_lead_from_conversation(
     conversation_text = "\n".join(conversation_lines)
 
     extraction_prompt = textwrap.dedent(f"""\
-    Analyze the following conversation and extract any lead/contact information mentioned by the USER.
+    Analyze the following conversation and extract any lead/contact information mentioned by the USER,
+    as well as determining the next expected input from the assistant's latest reply.
     Look for:
     - The user's name (e.g., "I'm Suma", "My name is John", or when the assistant addresses them by name)
     - Their company/organization (e.g., "I work at Pfizer", "We are from Google", "our company XYZ")
     - Email address
     - Phone number
     - What they are looking for (notes/requirements)
+    - The expected input (which field the assistant is asking for in the latest ASSISTANT reply)
 
     Conversation:
     {conversation_text}
 
     Respond with ONLY a JSON object in this exact format, nothing else:
-    {{"lead_name":"...","company_name":"...","email":"...","phone":"...","notes":"...","ready":true/false,"facts":[]}}
+    {{"lead_name":"...","company_name":"...","email":"...","phone":"...","notes":"...","ready":true/false,"facts":[],"expected_input":"lead_name" | "company_name" | "email" | "phone" | null}}
 
     Rules:
     - Use "" for any field not mentioned in the conversation.
     - Set "ready" to true if BOTH lead_name and company_name are non-empty.
     - Only extract information that the USER explicitly stated. Do NOT guess or hallucinate.
+    - Set "expected_input" to the field name that the assistant explicitly asked for in the latest ASSISTANT reply ("lead_name", "company_name", "email", "phone", or null).
     """)
 
     try:
@@ -250,10 +295,20 @@ async def fallback_extract_lead_from_conversation(
 
 def strip_lead_json(text: str) -> str:
     """Remove the lead JSON block from the response shown to the user."""
+    # 1. Strip any code block containing lead_name
     text = re.sub(r'```json\s*\n?\s*\{.*?"lead_name".*?\}\s*\n?\s*```', '', text, flags=re.DOTALL)
+    
+    # 2. Strip any raw JSON block starting with {"lead_name" using brace counting
+    for match in list(re.finditer(r'\{\s*"lead_name"', text)):
+        json_str = _extract_json_by_braces(text, match.start())
+        if json_str:
+            text = text.replace(json_str, "")
+            
+    # 3. Fallback cleanups of legacy regexes just in case
     text = re.sub(r'\{"lead_name":.+?"ready"\s*:\s*(?:true|false)\s*\}', '', text, flags=re.DOTALL)
     text = re.sub(r'\{"lead_name":.+?"facts"\s*:\s*\[.*?\]\s*\}', '', text, flags=re.DOTALL)
     return text.strip()
+
 
 async def background_compression_task(conversation_id: str):
     """Run conversation compression in background with a fresh DB connection."""
@@ -518,14 +573,23 @@ async def chat(
             sources.append(SourceInfo(title=r["title"], url=r["url"], score=round(r["score"], 3)))
             seen_urls.add(r["url"])
 
+    # Map expected input
+    expected_input_data = None
+    if lead_json and lead_json.get("expected_input"):
+        mapped = map_expected_input(lead_json["expected_input"])
+        if mapped:
+            expected_input_data = ExpectedInputSchema(**mapped)
+
     return ChatResponse(
         reply=clean_reply,
         session_id=session_id,
         user_id=resolved_user_id,
         sources=sources[:3],
         lead_collected=LeadStateSchema(**lead_data),
-        lead_saved=lead_just_saved
+        lead_saved=lead_just_saved,
+        expected_input=expected_input_data
     )
+
 
 
 @router.post("/chat/stream")
@@ -668,6 +732,11 @@ async def chat_stream(
                 sources.append({"title": r["title"], "url": r["url"], "score": round(r["score"], 3)})
                 seen_urls.add(r["url"])
 
+        # Map expected input
+        expected_input_data = None
+        if lead_json and lead_json.get("expected_input"):
+            expected_input_data = map_expected_input(lead_json["expected_input"])
+
         # Send final metadata event (use resolved_user_id so frontend updates its stored identity)
         metadata = {
             "type": "metadata",
@@ -675,7 +744,8 @@ async def chat_stream(
             "user_id": resolved_user_id,
             "sources": sources[:3],
             "lead": lead_data,
-            "lead_saved": lead_just_saved
+            "lead_saved": lead_just_saved,
+            "expected_input": expected_input_data
         }
         yield f"data: {json.dumps(metadata)}\n\n"
 
