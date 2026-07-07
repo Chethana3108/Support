@@ -44,6 +44,9 @@ personalize our conversation?**")
 you with?** That helps me tailor my recommendations.")
 - **email**: Optionally ask for their email to send details or schedule a call (e.g., "I'd love to share \
 a detailed proposal — **what's the best email to reach you?**")
+- **appointment_date**: After getting their email, ask if they'd like to book an appointment date \
+(e.g., "**Would you like to book an appointment for a consultation? What date works best for you? (DD-MM-YYYY)**"). \
+The user should provide the date in DD-MM-YYYY format.
 - **phone**: Optionally ask for phone (e.g., "**Would you like our expert to call you?** If so, \
 **what's a good number?**")
 
@@ -65,18 +68,19 @@ If the user has mentioned their name or company at ANY point in the conversation
 
 Format — output EXACTLY this structure on its own line at the very end:
 ```json
-{"lead_name":"...","email":"...","phone":"...","company_name":"...","notes":"...","ready":true/false,"facts":["..."],"expected_input":"lead_name" | "company_name" | "email" | "phone" | null}
+{"lead_name":"...","email":"...","appointment_date":"...","phone":"...","company_name":"...","notes":"...","ready":true/false,"facts":["..."],"expected_input":"lead_name" | "company_name" | "email" | "appointment_date" | "phone" | null}
 ```
 
 Rules for filling this JSON:
 - "lead_name": The person's name. If they said "I'm Suma" or "My name is John", put that name here.
 - "company_name": Their organization. If they said "I work at Pfizer" or "We are from Google", put that here.
 - "email": Their email address if shared. Use "" if not yet collected.
+- "appointment_date": The appointment date in DD-MM-YYYY format if shared. Use "" if not yet collected.
 - "phone": Their phone number if shared. Use "" if not yet collected.
 - "notes": Brief summary of what the user is looking for / their requirements. If the user's requirements or challenges change during the conversation (e.g. they switch to a different service/project topic), you MUST update this summary to reflect their new/updated requirements. Otherwise, keep the summary focused on the core project topic and avoid minor wording fluctuations from turn to turn.
 - "ready": Set to true when you have BOTH lead_name AND company_name. Otherwise false.
 - "facts": List of 1-3 new core user facts learned this turn.
-- "expected_input": The field you are explicitly asking the user for in this response (must be one of: "lead_name", "company_name", "email", "phone"). If you are not asking the user for any of these contact details in this turn, set this to null.
+- "expected_input": The field you are explicitly asking the user for in this response (must be one of: "lead_name", "company_name", "email", "appointment_date", "phone"). If you are not asking the user for any of these contact details in this turn, set this to null.
 
 
 ⚠️ CRITICAL: If the user has ALREADY shared their name or company in a PREVIOUS message in the conversation,
@@ -202,6 +206,14 @@ def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
             "placeholder": "Enter your email",
             "required": True
         }
+    elif field_clean in ("appointment_date", "date", "appointment"):
+        return {
+            "field": "appointment_date",
+            "input_type": "date",
+            "label": "Appointment Date",
+            "placeholder": "DD-MM-YYYY",
+            "required": True
+        }
     elif field_clean in ("phone", "tel", "phone_number", "telephone", "mobile", "contact", "contact_number", "phonenumber"):
         return {
             "field": "phone",
@@ -278,6 +290,22 @@ def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
         ]
         return any(re.search(p, reply_lower) for p in patterns)
 
+    elif field == "appointment_date":
+        patterns = [
+            r"\bbook\s+(?:an?\s+)?appointment\b",
+            r"\bappointment\s+date\b",
+            r"\bschedule\s+(?:an?\s+)?(?:appointment|meeting|consultation|call|session)\b",
+            r"\bwhat\s+date\b.*\b(?:works?|prefer|suit|convenient)\b",
+            r"\bpreferred?\s+date\b",
+            r"\bwhen\s+would\s+you\s+(?:like|prefer)\b",
+            r"\bpick\s+a\s+date\b",
+            r"\bchoose\s+a\s+date\b",
+            r"\bdate\s+(?:works?|suits?)\s+(?:best|you)\b",
+            r"\bconvenient\s+date\b",
+            r"\bdd-mm-yyyy\b",
+        ]
+        return any(re.search(p, reply_lower) for p in patterns)
+
     elif field == "phone":
         patterns = [
             r"\byour\s+(?:phone|mobile|contact|cell)\s*(?:number)?\b.*\?",
@@ -328,6 +356,7 @@ async def fallback_extract_lead_from_conversation(
     - The user's name (e.g., "I'm Suma", "My name is John", or when the assistant addresses them by name)
     - Their company/organization (e.g., "I work at Pfizer", "We are from Google", "our company XYZ")
     - Email address
+    - Appointment date (in DD-MM-YYYY format)
     - Phone number
     - What they are looking for (notes/requirements)
     - The expected input (which field the assistant is asking for in the latest ASSISTANT reply)
@@ -336,13 +365,13 @@ async def fallback_extract_lead_from_conversation(
     {conversation_text}
 
     Respond with ONLY a JSON object in this exact format, nothing else:
-    {{"lead_name":"...","company_name":"...","email":"...","phone":"...","notes":"...","ready":true/false,"facts":[],"expected_input":"lead_name" | "company_name" | "email" | "phone" | null}}
+    {{"lead_name":"...","company_name":"...","email":"...","appointment_date":"...","phone":"...","notes":"...","ready":true/false,"facts":[],"expected_input":"lead_name" | "company_name" | "email" | "appointment_date" | "phone" | null}}
 
     Rules:
     - Use "" for any field not mentioned in the conversation.
     - Set "ready" to true if BOTH lead_name and company_name are non-empty.
     - Only extract information that the USER explicitly stated. Do NOT guess or hallucinate.
-    - Set "expected_input" to the field name that the assistant explicitly asked for in the latest ASSISTANT reply ("lead_name", "company_name", "email", "phone", or null).
+    - Set "expected_input" to the field name that the assistant explicitly asked for in the latest ASSISTANT reply ("lead_name", "company_name", "email", "appointment_date", "phone", or null).
     """)
 
     try:
@@ -506,6 +535,7 @@ async def process_post_chat(
         "lead_name": lead_state.lead_name,
         "company_name": lead_state.company_name,
         "email": lead_state.email,
+        "appointment_date": lead_state.appointment_date,
         "phone": lead_state.phone,
         "notes": lead_state.notes,
     }
@@ -582,6 +612,7 @@ async def build_dynamic_prompt(
         "lead_name": lead_state.lead_name,
         "company_name": lead_state.company_name,
         "email": lead_state.email,
+        "appointment_date": lead_state.appointment_date,
         "phone": lead_state.phone,
         "notes": lead_state.notes,
     }

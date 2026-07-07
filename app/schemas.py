@@ -15,6 +15,7 @@ class LeadStateSchema(BaseModel):
     lead_name: str = ""
     company_name: str = ""
     email: str = ""
+    appointment_date: str = ""
     phone: str = ""
     notes: str = ""
 

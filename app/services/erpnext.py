@@ -77,6 +77,27 @@ class ERPNextService:
 
         return f"{bold_timestamp} {notes.strip()}"
 
+    @staticmethod
+    def _convert_date_to_erp_format(date_str: str) -> str:
+        """Convert DD-MM-YYYY date string to ERPNext's YYYY-MM-DD format.
+        
+        Returns empty string if the input is empty or cannot be parsed.
+        """
+        if not date_str or not date_str.strip():
+            return ""
+        date_clean = date_str.strip()
+        try:
+            parsed = datetime.strptime(date_clean, "%d-%m-%Y")
+            return parsed.strftime("%Y-%m-%d")
+        except ValueError:
+            # Try YYYY-MM-DD in case it's already in ERPNext format
+            try:
+                parsed = datetime.strptime(date_clean, "%Y-%m-%d")
+                return date_clean
+            except ValueError:
+                logger.warning(f"Could not parse appointment date: '{date_clean}'")
+                return ""
+
     @classmethod
     def _extract_plain_notes(cls, custom_bot_service: str) -> str:
         """Strip all formatting (Unicode bold, timestamps, separators) from existing
@@ -233,6 +254,10 @@ class ERPNextService:
             "custom_bot_service": formatted_note,
             "source": "Bot",
         }
+        # Convert and include appointment date if provided
+        erp_date = cls._convert_date_to_erp_format(lead_data.get("appointment_date", ""))
+        if erp_date:
+            payload["custom_appointment_date"] = erp_date
         if full_notes:
             payload["notes"] = [{"note": full_notes}]
 
@@ -321,6 +346,10 @@ class ERPNextService:
             "custom_bot_service": updated_custom_bot_service,
             "source": "Bot",
         }
+        # Convert and include appointment date if provided
+        erp_date = cls._convert_date_to_erp_format(lead_data.get("appointment_date", ""))
+        if erp_date:
+            payload["custom_appointment_date"] = erp_date
         if full_notes:
             payload["notes"] = [{"note": full_notes}]
 

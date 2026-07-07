@@ -62,6 +62,7 @@ class LeadState(Base):
     lead_name: Mapped[str] = mapped_column(String, default="")
     company_name: Mapped[str] = mapped_column(String, default="")
     email: Mapped[str] = mapped_column(String, default="")
+    appointment_date: Mapped[str] = mapped_column(String, default="")
     phone: Mapped[str] = mapped_column(String, default="")
     notes: Mapped[str] = mapped_column(String, default="")
     lead_saved: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -43,6 +43,7 @@ class LeadService:
                     lead_name=prev_lead.lead_name,
                     company_name=prev_lead.company_name,
                     email=prev_lead.email,
+                    appointment_date=prev_lead.appointment_date,
                     phone=prev_lead.phone,
                     notes=prev_lead.notes,
                     lead_saved=prev_lead.lead_saved,
@@ -54,6 +55,7 @@ class LeadService:
                     lead_name="",
                     company_name="",
                     email="",
+                    appointment_date="",
                     phone="",
                     notes=""
                 )
@@ -155,7 +157,7 @@ class LeadService:
         lead_state = await cls.get_or_create_lead_state(db, conversation_id, user_id)
         newly_filled = {}
 
-        for key in ["lead_name", "company_name", "email", "phone", "notes"]:
+        for key in ["lead_name", "company_name", "email", "appointment_date", "phone", "notes"]:
             val = new_data.get(key, "")
             if isinstance(val, str):
                 val = val.strip()
@@ -223,6 +225,7 @@ class LeadService:
             "lead_name": lead_state.lead_name,
             "company_name": lead_state.company_name,
             "email": lead_state.email,
+            "appointment_date": lead_state.appointment_date,
             "phone": lead_state.phone,
             "notes": lead_state.notes,
         }
