@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 from app.config import settings
@@ -68,7 +68,8 @@ class ERPNextService:
         if not notes or not notes.strip():
             return ""
 
-        timestamp = datetime.now()
+        IST = timezone(timedelta(hours=5, minutes=30))
+        timestamp = datetime.now(IST)
         date_str = timestamp.strftime("%d-%m-%Y")
         time_str = timestamp.strftime("%I:%M %p")
 
