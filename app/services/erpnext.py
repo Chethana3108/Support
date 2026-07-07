@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import Optional, Dict, Any
 from datetime import datetime
 import httpx
@@ -21,6 +22,79 @@ class ERPNextService:
             "Authorization": f"token {settings.ERPNEXT_API_KEY}:{settings.ERPNEXT_API_SECRET}",
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _to_unicode_bold(text: str) -> str:
+        """Convert ASCII letters and digits to their Unicode Mathematical Bold equivalents.
+
+        These render as visually bold in any plain-text field without HTML support.
+        Characters without a bold variant (punctuation, spaces, etc.) are kept as-is.
+        """
+        result = []
+        for ch in text:
+            if 'A' <= ch <= 'Z':
+                result.append(chr(0x1D400 + ord(ch) - ord('A')))
+            elif 'a' <= ch <= 'z':
+                result.append(chr(0x1D41A + ord(ch) - ord('a')))
+            elif '0' <= ch <= '9':
+                result.append(chr(0x1D7CE + ord(ch) - ord('0')))
+            else:
+                result.append(ch)
+        return ''.join(result)
+
+    @staticmethod
+    def _from_unicode_bold(text: str) -> str:
+        """Convert Unicode Mathematical Bold characters back to plain ASCII for comparison."""
+        result = []
+        for ch in text:
+            cp = ord(ch)
+            if 0x1D400 <= cp <= 0x1D419:      # Bold A-Z
+                result.append(chr(ord('A') + cp - 0x1D400))
+            elif 0x1D41A <= cp <= 0x1D433:     # Bold a-z
+                result.append(chr(ord('a') + cp - 0x1D41A))
+            elif 0x1D7CE <= cp <= 0x1D7D7:     # Bold 0-9
+                result.append(chr(ord('0') + cp - 0x1D7CE))
+            else:
+                result.append(ch)
+        return ''.join(result)
+
+    @classmethod
+    def _format_bot_service_entry(cls, notes: str) -> str:
+        """Format a notes string into a one-line entry for custom_bot_service.
+
+        Format: [𝟎𝟕-𝟎𝟕-𝟐𝟎𝟐𝟔 | 𝟏𝟎:𝟒𝟑 𝐀𝐌] notes text
+        The date/time portion uses Unicode bold characters for visual emphasis.
+        """
+        if not notes or not notes.strip():
+            return ""
+
+        timestamp = datetime.now()
+        date_str = timestamp.strftime("%d-%m-%Y")
+        time_str = timestamp.strftime("%I:%M %p")
+
+        bold_timestamp = cls._to_unicode_bold(f"[{date_str} | {time_str}]")
+
+        return f"{bold_timestamp} {notes.strip()}"
+
+    @classmethod
+    def _extract_plain_notes(cls, custom_bot_service: str) -> str:
+        """Strip all formatting (Unicode bold, timestamps, separators) from existing
+        custom_bot_service text, returning only the raw note content for dedup comparison."""
+        if not custom_bot_service:
+            return ""
+        # Normalize Unicode bold characters back to ASCII
+        plain = cls._from_unicode_bold(custom_bot_service)
+        # Remove HTML tags (in case of old entries)
+        plain = re.sub(r'<[^>]+>', '', plain)
+        # Remove timestamp blocks like [07-07-2026 | 10:43 AM]
+        plain = re.sub(r'\[\d{2}-\d{2}-\d{4}\s*\|\s*\d{1,2}:\d{2}\s*[APap][Mm]\]', '', plain)
+        # Also handle the old format [YYYY-MM-DD HH:MM:SS]
+        plain = re.sub(r'\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]', '', plain)
+        # Remove separator lines
+        plain = plain.replace('---', '')
+        # Collapse whitespace
+        plain = re.sub(r'\s+', ' ', plain).strip()
+        return plain
 
     @classmethod
     @retry(
@@ -147,10 +221,7 @@ class ERPNextService:
         truly mandatory for ERPNext; email, phone, and company are optional.
         """
         full_notes = lead_data.get("notes", "")
-        formatted_note = ""
-        if full_notes:
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            formatted_note = f"[{timestamp}] {full_notes}"
+        formatted_note = cls._format_bot_service_entry(full_notes)
 
         payload = {
             "doctype": "Lead",
@@ -226,10 +297,11 @@ class ERPNextService:
         # Determine the updated custom_bot_service value
         if full_notes:
             clean_note = full_notes.strip()
-            # If the new note is already a substring of the existing notes, do not append
-            if clean_note and clean_note not in existing_custom_bot_service:
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                new_entry = f"[{timestamp}] {full_notes}"
+            # Extract plain text from existing entries for robust dedup comparison
+            existing_plain = cls._extract_plain_notes(existing_custom_bot_service)
+            # Only append if the note content is genuinely new
+            if clean_note and clean_note not in existing_plain:
+                new_entry = cls._format_bot_service_entry(full_notes)
                 if existing_custom_bot_service:
                     updated_custom_bot_service = f"{existing_custom_bot_service}\n{new_entry}"
                 else:

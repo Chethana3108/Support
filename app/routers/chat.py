@@ -73,7 +73,7 @@ Rules for filling this JSON:
 - "company_name": Their organization. If they said "I work at Pfizer" or "We are from Google", put that here.
 - "email": Their email address if shared. Use "" if not yet collected.
 - "phone": Their phone number if shared. Use "" if not yet collected.
-- "notes": Brief summary of what the user is looking for / their requirements. Once notes are created (when lead is ready with name and company), DO NOT change, rewrite, or update them in subsequent turns; keep the exact same text.
+- "notes": Brief summary of what the user is looking for / their requirements. If the user's requirements or challenges change during the conversation (e.g. they switch to a different service/project topic), you MUST update this summary to reflect their new/updated requirements. Otherwise, keep the summary focused on the core project topic and avoid minor wording fluctuations from turn to turn.
 - "ready": Set to true when you have BOTH lead_name AND company_name. Otherwise false.
 - "facts": List of 1-3 new core user facts learned this turn.
 - "expected_input": The field you are explicitly asking the user for in this response (must be one of: "lead_name", "company_name", "email", "phone"). If you are not asking the user for any of these contact details in this turn, set this to null.
@@ -231,12 +231,13 @@ def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
         patterns = [
             r"\byour\s+(?:good\s+)?name\b",
             r"\bmay\s+i\s+(?:know|have)\s+your\s+name\b",
-            r"\bwhat(?:'s|\s+is)\s+your\s+name\b",
+            r"\bwhat(?:'s|\s+is)\s+.*?\bname\b",
             r"\bwho\s+(?:am\s+i\s+speaking|is\s+this)\b",
             r"\bhow\s+(?:should|shall|can|may)\s+i\s+(?:address|call)\s+you\b",
             r"\bintroduce\s+yourself\b",
             r"\bwhat\s+(?:should|shall|can|may)\s+i\s+call\s+you\b",
             r"\bcould\s+(?:you\s+)?(?:share|tell\s+me)\s+your\s+name\b",
+            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|tell\s+me|provide)\s+.*?\bname\b",
             r"\bi(?:'d|\s+would)\s+love\s+to\s+know\s+your\s+name\b",
             r"\bpersonalize\b.*\byour\s+name\b",
             r"\bknow\s+your\s+name\b",
@@ -246,7 +247,7 @@ def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
     elif field == "company_name":
         patterns = [
             r"\bwhich\s+(?:organization|company|firm|business)\b",
-            r"\bwhat(?:'s|\s+is)\s+your\s+(?:organization|company|firm)\b",
+            r"\bwhat(?:'s|\s+is)\s+.*?\b(?:organization|company|firm|business)\b",
             r"\bwhat\s+(?:organization|company|firm)\b.*\b(?:are\s+you|do\s+you)\b",
             r"\bwh(?:ich|at)\s+(?:organization|company|firm)\s+(?:are\s+you|do\s+you)\b",
             r"\byou\s+(?:associated|affiliated)\s+with\b",
@@ -255,6 +256,7 @@ def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
             r"\byou\s+work\s+(?:for|at|with)\b.*\?",
             r"\byour\s+(?:organization|company|firm|business)\b.*\?",
             r"\bcould\s+(?:you\s+)?(?:share|tell\s+me)\s+(?:your\s+)?(?:organization|company)\b",
+            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|tell\s+me|provide)\s+.*?\b(?:organization|company|firm|business)\b",
             r"\bknow\s+(?:your|which)\s+(?:organization|company)\b",
         ]
         return any(re.search(p, reply_lower) for p in patterns)
@@ -262,8 +264,9 @@ def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
     elif field == "email":
         patterns = [
             r"\byour\s+(?:email|e-mail)\b",
-            r"\bwhat(?:'s|\s+is)\s+your\s+(?:email|e-mail)\b",
+            r"\bwhat(?:'s|\s+is)\s+.*?\b(?:email|e-mail)\b",
             r"\bshare\s+(?:your\s+)?(?:email|e-mail)\b",
+            r"\b(?:share|provide)\s+.*?\b(?:email|e-mail)\b",
             r"\bbest\s+(?:email|e-mail)\s+to\s+reach\b",
             r"\bemail\s+(?:address|id)\b.*\?",
             r"\bsend\s+(?:you|it|details|info|proposal|brochure)\b.*\b(?:email|e-mail|inbox)\b",
@@ -271,21 +274,28 @@ def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
             r"\breach\s+you\b.*\b(?:email|e-mail)\b",
             r"\b(?:email|e-mail)\b.*\breach\s+you\b",
             r"\bcould\s+(?:you\s+)?(?:share|provide)\s+(?:your\s+)?(?:email|e-mail)\b",
+            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|provide)\s+.*?\b(?:email|e-mail)\b",
         ]
         return any(re.search(p, reply_lower) for p in patterns)
 
     elif field == "phone":
         patterns = [
             r"\byour\s+(?:phone|mobile|contact|cell)\s*(?:number)?\b.*\?",
-            r"\bwhat(?:'s|\s+is)\s+(?:your\s+)?(?:phone|mobile|contact)\s*(?:number)?\b",
+            r"\bwhat(?:'s|\s+is)\s+.*?\b(?:phone|mobile|contact|cell)\s*(?:number)?\b",
             r"\bshare\s+(?:your\s+)?(?:phone|mobile|contact)\s*(?:number)?\b",
+            r"\b(?:share|provide)\s+.*?\b(?:phone|mobile|contact|cell)\s*(?:number)?\b",
             r"\bgood\s+(?:number|phone)\s+to\s+(?:reach|call|contact)\b",
-            r"\bcall\s+you\b.*\b(?:number|phone|mobile)\b",
-            r"\b(?:number|phone|mobile)\b.*\bcall\s+you\b",
-            r"\bour\s+(?:expert|team|consultant)\s+(?:to\s+)?call\s+you\b",
+            r"\bgood\s+.*?(?:number|phone|mobile|contact)\s+to\s+(?:reach|call|contact)\b",
+            r"\bcall\s+you\b.*\b(?:number|phone|mobile|contact)\b",
+            r"\b(?:number|phone|mobile|contact)\b.*\bcall\s+you\b",
+            r"\bour\s+(?:expert|team|consultant|sitecore\s+expert)\s+.*?\bcall\s+you\b",
             r"\bgive\s+(?:you|them)\s+a\s+call\b.*\b(?:number|phone)\b",
+            r"\bgive\s+.*?\bcall\b.*\b(?:number|phone|mobile|contact)\b",
+            r"\b(?:number|phone|mobile|contact)\b.*\bgive\s+.*?\bcall\b",
             r"\bwould\s+you\s+like\s+(?:a\s+)?call\b",
             r"\bcould\s+(?:you\s+)?(?:share|provide)\s+(?:your\s+)?(?:phone|mobile|contact)\b",
+            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|provide)\s+.*?\b(?:phone|mobile|contact|cell)\b",
+            r"\bphone\s+number\s+where\s+we\s+can\s+reach\s+you\b",
         ]
         return any(re.search(p, reply_lower) for p in patterns)
 
@@ -452,6 +462,7 @@ async def process_post_chat(
                     user_id = resolved_user_id
             except Exception as e:
                 logger.error(f"Error resolving user identity: {e}", exc_info=True)
+                await db.rollback()
                 # Non-fatal: continue with original user_id
 
         # Store Episodic Memories (using resolved user_id)
@@ -478,6 +489,7 @@ async def process_post_chat(
         logger.debug(f"Lead sync result: {sync_result}")
     except Exception as e:
         logger.error(f"Error syncing lead to ERPNext: {e}", exc_info=True)
+        await db.rollback()
 
     # 3. Save User and Assistant Messages & generate vector embeddings
     await MemoryService.store_message_and_embed(db, conversation_id, user_id, "user", user_message)

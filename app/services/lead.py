@@ -65,6 +65,82 @@ class LeadService:
         return lead_state
 
     @classmethod
+    async def extract_new_requirement_part(cls, old_requirement: str, new_requirement: str) -> str:
+        """
+        Use DeepSeek to extract only the new/changed requirement part, removing
+        any parts that are just repeating the old requirement.
+        If the new requirement is completely different, it will return the new requirement.
+        """
+        if not old_requirement:
+            return new_requirement.strip()
+        
+        old_clean = old_requirement.strip()
+        new_clean = new_requirement.strip()
+        if old_clean == new_clean:
+            return ""
+
+        prompt = f"""
+        Given an old requirement summary and a new requirement summary, extract ONLY the new requirement details that have been added or changed in the new summary.
+        Do not include details that are already present in the old requirement.
+        If the new summary is completely different, return the new summary.
+
+        Old Requirement: {old_clean}
+        New Requirement: {new_clean}
+
+        Respond with ONLY the newly added or changed requirement text. Do not include any introductory text or explanation.
+        """
+        try:
+            from app.services.llm import call_deepseek
+            reply = await call_deepseek([
+                {"role": "system", "content": "You are a precise text extraction assistant. Output only the requested new requirement text."},
+                {"role": "user", "content": prompt}
+            ])
+            extracted = reply.strip()
+            logger.debug(f"Extracted new requirement part: '{old_clean}' vs '{new_clean}' -> '{extracted}'")
+            return extracted
+        except Exception as e:
+            logger.error(f"Error extracting new requirement part: {e}")
+            return new_clean
+
+    @classmethod
+    async def has_requirement_topic_changed(cls, old_requirement: str, new_requirement: str) -> bool:
+        """
+        Use DeepSeek to determine if the user's requirement/topic has actually changed to a new subject,
+        as opposed to being a minor rephrasing, refinement, or elaboration of the same requirement.
+        """
+        if not old_requirement or not new_requirement:
+            return False
+        
+        old_clean = old_requirement.strip()
+        new_clean = new_requirement.strip()
+        if old_clean == new_clean:
+            return False
+
+        prompt = f"""
+        Compare the following two user requirement summaries for a customer support / services bot.
+        Determine if the requirement has changed to a DIFFERENT topic/project requirement (e.g. from "knowledge bot" to "data migration", or from "React development" to "Sitecore upgrade").
+        If the new requirement is just a minor rephrasing, refinement, elaboration, or detail addition of the old requirement (e.g. "knowledge bot" vs "knowledge bot for customer support on Sitecore"), it has NOT changed.
+
+        Old Requirement: {old_clean}
+        New Requirement: {new_clean}
+
+        Respond with exactly 'YES' if the requirement has changed to a different topic, and 'NO' if it is a minor rephrasing, refinement, elaboration, or has not changed.
+        Respond with ONLY 'YES' or 'NO'. No other text.
+        """
+        try:
+            from app.services.llm import call_deepseek
+            reply = await call_deepseek([
+                {"role": "system", "content": "You are a precise classification assistant. Respond with ONLY 'YES' or 'NO'."},
+                {"role": "user", "content": prompt}
+            ])
+            result = reply.strip().upper()
+            logger.debug(f"Requirement topic change detection: '{old_clean}' vs '{new_clean}' -> {result}")
+            return "YES" in result
+        except Exception as e:
+            logger.error(f"Error checking if requirement topic changed: {e}")
+            return False
+
+    @classmethod
     async def update_lead_state(
         cls, 
         db: AsyncSession, 
@@ -99,8 +175,14 @@ class LeadService:
                     newly_filled[key] = val
                 elif existing_val != val:
                     if key == "notes":
-                        # Once notes are set, do not overwrite/update them
-                        continue
+                        # Check if the notes topic actually changed.
+                        # If it is just a minor rephrasing/elaboration, do not overwrite/update.
+                        if not await cls.has_requirement_topic_changed(existing_val, val):
+                            continue
+                        # Extract only the newly added/changed requirement part
+                        val = await cls.extract_new_requirement_part(existing_val, val)
+                        if not val:
+                            continue
                     setattr(lead_state, key, val)
                     newly_filled[key] = val
         
