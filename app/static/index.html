@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BizBot - AI Sales & Discovery Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+      --card-bg: rgba(30, 41, 59, 0.7);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --accent-primary: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-light: rgba(99, 102, 241, 0.15);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --user-msg-bg: #4f46e5;
+      --bot-msg-bg: rgba(51, 65, 85, 0.8);
+      --success-color: #10b981;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    body {
+      background: var(--bg-gradient);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .chat-container {
+      width: 100%;
+      max-width: 850px;
+      height: 90vh;
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      overflow: hidden;
+    }
+
+    .chat-header {
+      padding: 20px 24px;
+      background: rgba(15, 23, 42, 0.6);
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .header-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .bot-avatar {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, #6366f1, #a855f7);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 20px;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+
+    .header-text h2 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .header-text p {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scroll-behavior: smooth;
+    }
+
+    .message-row {
+      display: flex;
+      gap: 12px;
+      max-width: 85%;
+    }
+
+    .message-row.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .message-row.bot {
+      align-self: flex-start;
+    }
+
+    .bubble {
+      padding: 14px 18px;
+      border-radius: 18px;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .message-row.user .bubble {
+      background: var(--user-msg-bg);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+    }
+
+    .message-row.bot .bubble {
+      background: var(--bot-msg-bg);
+      color: var(--text-main);
+      border-bottom-left-radius: 4px;
+      border: 1px solid var(--card-border);
+    }
+
+    .case-study-card {
+      margin-top: 10px;
+      padding: 12px 16px;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 12px;
+      font-size: 13px;
+    }
+
+    .case-study-card a {
+      color: #818cf8;
+      text-decoration: underline;
+      font-weight: 600;
+    }
+
+    .form-container {
+      margin-top: 14px;
+      padding: 16px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .form-group input, .form-group select {
+      padding: 10px 14px;
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+      transition: border 0.2s;
+    }
+
+    .form-group input:focus, .form-group select:focus {
+      border-color: var(--accent-primary);
+    }
+
+    .btn-submit {
+      padding: 12px;
+      background: linear-gradient(135deg, #6366f1, #4f46e5);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+
+    .btn-submit:hover {
+      opacity: 0.9;
+    }
+
+    .chat-input-area {
+      padding: 16px 24px;
+      background: rgba(15, 23, 42, 0.8);
+      border-top: 1px solid var(--card-border);
+      display: flex;
+      gap: 12px;
+    }
+
+    .chat-input-area input {
+      flex: 1;
+      padding: 14px 18px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      color: #fff;
+      font-size: 15px;
+      outline: none;
+    }
+
+    .chat-input-area button {
+      padding: 14px 24px;
+      background: var(--accent-primary);
+      border: none;
+      border-radius: 14px;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .chat-input-area button:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Booking Modal Overlay */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-card {
+      width: 100%;
+      max-width: 450px;
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-header h3 {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .btn-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    .booking-rules-badge {
+      padding: 8px 12px;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 8px;
+      font-size: 12px;
+      color: #a5b4fc;
+    }
+
+    .no-slots-alert {
+      padding: 10px;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+      font-size: 13px;
+      color: #fca5a5;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="chat-container">
+    <div class="chat-header">
+      <div class="header-info">
+        <div class="bot-avatar">🤖</div>
+        <div class="header-text">
+          <h2>BizBot AI Consultant</h2>
+          <p>Sitecore Gold Partner & Digital Engineering</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="chat-messages" id="chat-messages">
+      <!-- Chat history dynamically appended here -->
+    </div>
+
+    <div class="chat-input-area">
+      <input type="text" id="user-input" placeholder="Type your response or project details..." onkeydown="handleKeyDown(event)">
+      <button onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+  <!-- Booking Modal (Strictly ONLY 2 Inputs: Date & Time) -->
+  <div class="modal-overlay" id="booking-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>📅 Book Discovery Call</h3>
+        <button class="btn-close" onclick="closeBookingModal()">✕</button>
+      </div>
+
+      <div class="booking-rules-badge">
+        ℹ️ <b>Booking Policy:</b> Appointments require a minimum 24-hour advance booking delay. Live slots are synced with Outlook Calendar.
+      </div>
+
+      <form id="booking-form" onsubmit="submitBooking(event)">
+        <!-- ONLY Input 1: Appointment Date -->
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label for="booking-date">Appointment Date</label>
+          <input type="date" id="booking-date" required onchange="fetchAvailableSlots()">
+        </div>
+
+        <!-- ONLY Input 2: Appointment Time -->
+        <div class="form-group" style="margin-bottom: 20px;">
+          <label for="booking-time">Appointment Time</label>
+          <select id="booking-time" required disabled>
+            <option value="">-- Select Date First --</option>
+          </select>
+        </div>
+
+        <div class="no-slots-alert" id="no-slots-msg">
+          No appointments are available for this date. Please choose another date.
+        </div>
+
+        <button type="submit" class="btn-submit" id="btn-confirm-booking" style="width: 100%;" disabled>Confirm Discovery Call</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let sessionId = localStorage.getItem('bizbot_session_id') || ('sess_' + Math.random().toString(36).substring(2, 11));
+    let userId = localStorage.getItem('bizbot_user_id') || ('user_' + Math.random().toString(36).substring(2, 11));
+    localStorage.setItem('bizbot_session_id', sessionId);
+    localStorage.setItem('bizbot_user_id', userId);
+
+    // Set min date attribute for 24-hour rule
+    document.addEventListener("DOMContentLoaded", () => {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const minDateStr = tomorrow.toISOString().split('T')[0];
+      document.getElementById('booking-date').setAttribute('min', minDateStr);
+      
+      // Load initial bot greeting
+      sendInitialGreeting();
+    });
+
+    function sendInitialGreeting() {
+      appendBotMessage("Hi! 👋 **What project or business challenge are you looking to solve?**");
+    }
+
+    function handleKeyDown(event) {
+      if (event.key === "Enter") {
+        sendMessage();
+      }
+    }
+
+    async function sendMessage() {
+      const inputEl = document.getElementById("user-input");
+      const text = inputEl.value.trim();
+      if (!text) return;
+
+      appendUserMessage(text);
+      inputEl.value = "";
+
+      try {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: text,
+            session_id: sessionId,
+            user_id: userId
+          })
+        });
+
+        const data = await response.json();
+        if (data.user_id) {
+          userId = data.user_id;
+          localStorage.setItem('bizbot_user_id', userId);
+        }
+
+        renderBotReply(data);
+      } catch (err) {
+        console.error("Chat error:", err);
+        appendBotMessage("Sorry, I encountered an issue connecting to the server. Please try again.");
+      }
+    }
+
+    function appendUserMessage(text) {
+      const messagesContainer = document.getElementById("chat-messages");
+      const row = document.createElement("div");
+      row.className = "message-row user";
+      row.innerHTML = `<div class="bubble">${escapeHtml(text)}</div>`;
+      messagesContainer.appendChild(row);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function appendBotMessage(text) {
+      const messagesContainer = document.getElementById("chat-messages");
+      const row = document.createElement("div");
+      row.className = "message-row bot";
+      row.innerHTML = `<div class="bubble">${formatMarkdown(text)}</div>`;
+      messagesContainer.appendChild(row);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function renderBotReply(data) {
+      const messagesContainer = document.getElementById("chat-messages");
+      const row = document.createElement("div");
+      row.className = "message-row bot";
+
+      let html = `<div class="bubble">${formatMarkdown(data.reply)}`;
+
+      // Render case studies if available
+      if (data.case_studies && data.case_studies.length > 0) {
+        data.case_studies.forEach(cs => {
+          html += `
+            <div class="case-study-card">
+              📌 <b>Case Study:</b> ${escapeHtml(cs.title)}<br>
+              <span style="font-size: 12px; color: #cbd5e1;">${escapeHtml(cs.summary)}</span><br>
+              <a href="${escapeHtml(cs.url)}" target="_blank">Read Full Case Study →</a>
+            </div>
+          `;
+        });
+      }
+
+      // Render Lead Form if requested by bot
+      if (data.lead_form && data.lead_form.fields) {
+        html += renderLeadFormHTML(data.lead_form.fields);
+      }
+
+      // Render Discovery Call Booking Form inline if requested
+      if (data.booking_form) {
+        html += renderBookingFormHTML();
+      }
+
+      html += `</div>`;
+      row.innerHTML = html;
+      messagesContainer.appendChild(row);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    function renderLeadFormHTML(fields) {
+      let formHtml = `
+        <div class="form-container">
+          <h4 style="font-size: 14px; color: #a5b4fc;">📋 Share Your Details for a Tailored Proposal</h4>
+          <form id="inline-lead-form" onsubmit="submitLeadForm(event)">
+            <div class="form-grid">
+      `;
+
+      fields.forEach(f => {
+        formHtml += `
+          <div class="form-group">
+            <label>${escapeHtml(f.label)}</label>
+            <input type="${f.input_type}" name="${f.field}" placeholder="${escapeHtml(f.placeholder)}" ${f.required ? 'required' : ''}>
+          </div>
+        `;
+      });
+
+      formHtml += `
+            </div>
+            <button type="submit" class="btn-submit" style="margin-top: 10px;">Submit Details</button>
+          </form>
+        </div>
+      `;
+      return formHtml;
+    }
+
+    async function submitLeadForm(e) {
+      e.preventDefault();
+      const form = e.target;
+      const formData = new FormData(form);
+
+      let summaryParts = [];
+      formData.forEach((val, key) => {
+        if (val) summaryParts.push(`${key}: ${val}`);
+      });
+
+      const messageText = "My contact details are: " + summaryParts.join(", ");
+      appendUserMessage("Submitted contact details.");
+      form.closest(".form-container").remove();
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: messageText,
+            session_id: sessionId,
+            user_id: userId
+          })
+        });
+        const data = await res.json();
+        renderBotReply(data);
+      } catch (err) {
+        console.error("Lead submission error:", err);
+      }
+    }
+
+    function renderBookingFormHTML() {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const minDateStr = tomorrow.toISOString().split('T')[0];
+
+      return `
+        <div class="form-container" id="inline-booking-container">
+          <h4 style="font-size: 14px; color: #a5b4fc; margin-bottom: 4px;">📅 Book Your Discovery Call</h4>
+          <div class="booking-rules-badge" style="margin-bottom: 8px; font-size: 11px; padding: 6px 8px; background: rgba(99, 102, 241, 0.15); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; color: #a5b4fc;">
+            ℹ️ Appointments require a minimum 24-hour advance booking delay. Live slots are synced with Outlook.
+          </div>
+          <form id="inline-booking-form" onsubmit="submitInlineBooking(event)">
+            <div class="form-grid">
+              <div class="form-group">
+                <label for="inline-booking-date">Appointment Date</label>
+                <input type="date" id="inline-booking-date" min="${minDateStr}" required onchange="fetchInlineAvailableSlots()">
+              </div>
+              <div class="form-group">
+                <label for="inline-booking-time">Appointment Time</label>
+                <select id="inline-booking-time" required disabled style="width: 100%; background: #1e293b; color: #fff; border: 1px solid var(--card-border); padding: 8px; border-radius: 8px;">
+                  <option value="">-- Select Date First --</option>
+                </select>
+              </div>
+            </div>
+            <div class="no-slots-alert" id="inline-no-slots-msg" style="margin-top: 8px; padding: 10px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; font-size: 13px; color: #fca5a5; display: none;">
+              No appointments are available for this date.
+            </div>
+            <button type="submit" class="btn-submit" id="btn-inline-confirm-booking" style="margin-top: 10px; width: 100%;" disabled>Confirm Discovery Call</button>
+          </form>
+        </div>
+      `;
+    }
+
+    async function fetchInlineAvailableSlots() {
+      const dateVal = document.getElementById("inline-booking-date").value;
+      const timeSelect = document.getElementById("inline-booking-time");
+      const alertMsg = document.getElementById("inline-no-slots-msg");
+      const confirmBtn = document.getElementById("btn-inline-confirm-booking");
+
+      timeSelect.innerHTML = `<option value="">Loading slots...</option>`;
+      timeSelect.disabled = true;
+      alertMsg.style.display = "none";
+      confirmBtn.disabled = true;
+
+      if (!dateVal) return;
+
+      try {
+        const res = await fetch(`/api/booking/slots?date=${encodeURIComponent(dateVal)}`);
+        const data = await res.json();
+
+        if (data.slots && data.slots.length > 0) {
+          let optionsHtml = `<option value="">-- Choose Time Slot --</option>`;
+          data.slots.forEach(slot => {
+            optionsHtml += `<option value="${slot}">${slot}</option>`;
+          });
+          timeSelect.innerHTML = optionsHtml;
+          timeSelect.disabled = false;
+          confirmBtn.disabled = false;
+        } else {
+          timeSelect.innerHTML = `<option value="">No Slots Available</option>`;
+          alertMsg.innerText = data.message || "No appointments are available for this date. Please choose another date.";
+          alertMsg.style.display = "block";
+        }
+      } catch (err) {
+        console.error("Error fetching slots:", err);
+        timeSelect.innerHTML = `<option value="">Error loading slots</option>`;
+      }
+    }
+
+    async function submitInlineBooking(e) {
+      e.preventDefault();
+      const dateVal = document.getElementById("inline-booking-date").value;
+      const timeVal = document.getElementById("inline-booking-time").value;
+      const confirmBtn = document.getElementById("btn-inline-confirm-booking");
+
+      if (!dateVal || !timeVal) return;
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerText = "Scheduling in Outlook...";
+
+      const messageText = `Submit Booking: Date: ${dateVal}, Time: ${timeVal}`;
+      appendUserMessage(`Requested booking for ${dateVal} at ${timeVal}`);
+      
+      const container = document.getElementById("inline-booking-container");
+      if (container) {
+        container.remove();
+      }
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: messageText,
+            session_id: sessionId,
+            user_id: userId
+          })
+        });
+        const data = await res.json();
+        renderBotReply(data);
+      } catch (err) {
+        console.error("Booking error:", err);
+        appendBotMessage("Booking failed. Please try again.");
+      }
+    }
+
+    function openBookingModal() {
+      document.getElementById("booking-modal").classList.add("active");
+    }
+
+    function closeBookingModal() {
+      document.getElementById("booking-modal").classList.remove("active");
+    }
+
+    async function fetchAvailableSlots() {
+      const dateVal = document.getElementById("booking-date").value;
+      const timeSelect = document.getElementById("booking-time");
+      const alertMsg = document.getElementById("no-slots-msg");
+      const confirmBtn = document.getElementById("btn-confirm-booking");
+
+      timeSelect.innerHTML = `<option value="">Loading slots from Outlook...</option>`;
+      timeSelect.disabled = true;
+      alertMsg.style.display = "none";
+      confirmBtn.disabled = true;
+
+      if (!dateVal) return;
+
+      try {
+        const res = await fetch(`/api/booking/slots?date=${encodeURIComponent(dateVal)}`);
+        const data = await res.json();
+
+        if (data.slots && data.slots.length > 0) {
+          let optionsHtml = `<option value="">-- Choose Time Slot --</option>`;
+          data.slots.forEach(slot => {
+            optionsHtml += `<option value="${slot}">${slot}</option>`;
+          });
+          timeSelect.innerHTML = optionsHtml;
+          timeSelect.disabled = false;
+          confirmBtn.disabled = false;
+        } else {
+          timeSelect.innerHTML = `<option value="">No Slots Available</option>`;
+          alertMsg.innerText = data.message || "No appointments are available for this date. Please choose another date.";
+          alertMsg.style.display = "block";
+        }
+      } catch (err) {
+        console.error("Error fetching slots:", err);
+        timeSelect.innerHTML = `<option value="">Error loading slots</option>`;
+      }
+    }
+
+    async function submitBooking(e) {
+      e.preventDefault();
+      const dateVal = document.getElementById("booking-date").value;
+      const timeVal = document.getElementById("booking-time").value;
+      const confirmBtn = document.getElementById("btn-confirm-booking");
+
+      if (!dateVal || !timeVal) return;
+
+      confirmBtn.disabled = true;
+      confirmBtn.innerText = "Scheduling in Outlook...";
+
+      try {
+        const res = await fetch("/api/booking/book", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            appointment_date: dateVal,
+            appointment_time: timeVal
+          })
+        });
+
+        const data = await res.json();
+        closeBookingModal();
+
+        appendBotMessage(`🎉 **Discovery Call Confirmed!**\n\nYour appointment is scheduled for **${data.appointment_date} at ${data.appointment_time}**.\nConfirmation emails have been sent to your email and chethana@biztechnosys.com.`);
+      } catch (err) {
+        console.error("Booking error:", err);
+        alert("Booking failed. Please try again.");
+      } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.innerText = "Confirm Discovery Call";
+      }
+    }
+
+    function formatMarkdown(text) {
+      if (!text) return "";
+      return text
+        .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
+        .replace(/\*(.*?)\*/g, '<i>$1</i>')
+        .replace(/\n\n/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+  </script>
+</body>
+</html>

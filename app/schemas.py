@@ -11,27 +11,58 @@ class SourceInfo(BaseModel):
     url: str
     score: float
 
+class CaseStudyInfo(BaseModel):
+    title: str
+    url: str
+    summary: str
+    score: float
+
 class LeadStateSchema(BaseModel):
     lead_name: str = ""
     company_name: str = ""
     email: str = ""
     appointment_date: str = ""
     phone: str = ""
+    country: str = ""
     notes: str = ""
 
-class ExpectedInputSchema(BaseModel):
+class LeadFormField(BaseModel):
     field: str
     input_type: str
     label: str
     placeholder: str
     required: bool
 
+class LeadFormSchema(BaseModel):
+    fields: List[LeadFormField]
+
+class BookingSlotResponse(BaseModel):
+    date: str
+    slots: List[str]
+    message: str
+
+class BookingRequest(BaseModel):
+    session_id: str
+    appointment_date: str = Field(..., description="Date in YYYY-MM-DD format")
+    appointment_time: str = Field(..., description="Selected time slot e.g. 03:30 PM")
+
+class BookingResponse(BaseModel):
+    success: bool
+    message: str
+    appointment_date: str
+    appointment_time: str
+
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
     user_id: str
     sources: List[SourceInfo] = []
+    case_studies: List[CaseStudyInfo] = []
     lead_collected: LeadStateSchema
     lead_saved: bool = False
-    expected_input: Optional[ExpectedInputSchema] = None
+    lead_form: Optional[LeadFormSchema] = None
+    booking_form: Optional[Dict[str, Any]] = None
+    conversation_complete: bool = False
+
+
 

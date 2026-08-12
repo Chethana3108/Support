@@ -86,3 +86,82 @@ class KnowledgeService:
         )
         
         return reranked_results
+
+    @staticmethod
+    async def search_case_studies(
+        db: AsyncSession,
+        query: str,
+        candidate_k: int = 10,
+        final_k: int = 2,
+        threshold: Optional[float] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Search specifically for case study chunks tagged with metadata type='case_study'.
+        
+        Uses the same vector similarity + cross-encoder reranking pipeline as
+        search_knowledge, but filters to only case study content. Returns the
+        top `final_k` (default 2) most relevant case studies.
+        """
+        if threshold is None:
+            threshold = settings.SIMILARITY_THRESHOLD_KNOWLEDGE
+
+        query_embedding = EmbedderService.encode_single(query)
+
+        cosine_distance = WebsiteChunk.embedding.cosine_distance(query_embedding).label("distance")
+        max_distance = 1.0 - threshold
+
+        stmt = (
+            select(WebsiteChunk, cosine_distance)
+            .where(
+                WebsiteChunk.embedding.cosine_distance(query_embedding) <= max_distance,
+                WebsiteChunk.meta["type"].astext == "case_study",
+            )
+            .order_by("distance")
+            .limit(candidate_k * 2)
+        )
+
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        candidates = []
+        seen_urls = set()
+
+        for chunk, dist in rows:
+            similarity = 1.0 - dist
+            text_content = chunk.content.strip()
+
+            # Deduplicate by URL so we get distinct case studies
+            if chunk.url in seen_urls:
+                # Keep the chunk but don't add a new candidate — merge text
+                for c in candidates:
+                    if c["url"] == chunk.url:
+                        # Append additional chunk text for richer context
+                        if len(c["text"]) < 1500:
+                            c["text"] += "\n" + text_content
+                        break
+                continue
+
+            seen_urls.add(chunk.url)
+            candidates.append({
+                "text": text_content,
+                "url": chunk.url,
+                "title": chunk.title,
+                "score": float(similarity),
+            })
+
+            if len(candidates) >= candidate_k:
+                break
+
+        if not candidates:
+            return []
+
+        # Rerank candidates using Cross-Encoder
+        reranked_results = RerankerService.rerank(
+            query=query,
+            items=candidates,
+            text_extractor=lambda item: item["text"],
+            top_k=final_k,
+        )
+
+        return reranked_results
+

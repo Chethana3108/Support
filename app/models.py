@@ -64,6 +64,7 @@ class LeadState(Base):
     email: Mapped[str] = mapped_column(String, default="")
     appointment_date: Mapped[str] = mapped_column(String, default="")
     phone: Mapped[str] = mapped_column(String, default="")
+    country: Mapped[str] = mapped_column(String, default="")
     notes: Mapped[str] = mapped_column(String, default="")
     lead_saved: Mapped[bool] = mapped_column(Boolean, default=False)
     lead_id: Mapped[str] = mapped_column(String, nullable=True)
@@ -113,6 +114,7 @@ class WebsiteChunk(Base):
     content: Mapped[str] = mapped_column(String, nullable=False)
     # Vector of 384 dimensions matching sentence-transformers/all-MiniLM-L6-v2
     embedding: Mapped[Vector] = mapped_column(Vector(384), nullable=False)
+    meta: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=get_utc_now)
 
 

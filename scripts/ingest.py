@@ -83,11 +83,20 @@ async def embed_and_store_chunks(db: AsyncSession, documents: List[dict]):
 
     # Insert into database
     for chunk in chunks:
+        # Tag case study chunks with metadata for dedicated retrieval
+        chunk_url = chunk["url"]
+        is_case_study = (
+            "/case-studies/" in chunk_url
+            and chunk_url.rstrip("/") != chunk_url.split("/case-studies/")[0] + "/case-studies"
+        )
+        chunk_meta = {"type": "case_study"} if is_case_study else {}
+
         db_chunk = WebsiteChunk(
             url=chunk["url"],
             title=chunk["title"],
             content=chunk["text"],
-            embedding=chunk["embedding"]
+            embedding=chunk["embedding"],
+            meta=chunk_meta,
         )
         db.add(db_chunk)
 
@@ -141,7 +150,7 @@ async def incremental_sync(db: AsyncSession, force: bool = False):
     if not documents:
         logger.error("No content extracted from any URL. Aborting sync.")
         return
-    
+     
     # Build lookup: url -> document
     doc_map: Dict[str, dict] = {doc["url"]: doc for doc in documents}
     crawled_urls: Set[str] = set(doc_map.keys())

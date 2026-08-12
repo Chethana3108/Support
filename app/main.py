@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text, select, func
@@ -14,8 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db, engine
-from app.routers import chat, sessions
-
+from app.routers import chat, sessions, booking
  
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -150,6 +150,13 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 # Include Routers
 app.include_router(chat.router)
 app.include_router(sessions.router)
+app.include_router(booking.router)
+
+import os
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
+
 
 # Health Endpoint
 @app.get("/api/health", tags=["Operations"])

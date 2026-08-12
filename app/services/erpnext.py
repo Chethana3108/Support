@@ -79,10 +79,6 @@ class ERPNextService:
 
     @staticmethod
     def _convert_date_to_erp_format(date_str: str) -> str:
-        """Convert DD-MM-YYYY date string to ERPNext's YYYY-MM-DD format.
-        
-        Returns empty string if the input is empty or cannot be parsed.
-        """
         if not date_str or not date_str.strip():
             return ""
         date_clean = date_str.strip()
@@ -90,7 +86,6 @@ class ERPNextService:
             parsed = datetime.strptime(date_clean, "%d-%m-%Y")
             return parsed.strftime("%Y-%m-%d")
         except ValueError:
-            # Try YYYY-MM-DD in case it's already in ERPNext format
             try:
                 parsed = datetime.strptime(date_clean, "%Y-%m-%d")
                 return date_clean
@@ -104,17 +99,11 @@ class ERPNextService:
         custom_bot_service text, returning only the raw note content for dedup comparison."""
         if not custom_bot_service:
             return ""
-        # Normalize Unicode bold characters back to ASCII
         plain = cls._from_unicode_bold(custom_bot_service)
-        # Remove HTML tags (in case of old entries)
         plain = re.sub(r'<[^>]+>', '', plain)
-        # Remove timestamp blocks like [07-07-2026 | 10:43 AM]
         plain = re.sub(r'\[\d{2}-\d{2}-\d{4}\s*\|\s*\d{1,2}:\d{2}\s*[APap][Mm]\]', '', plain)
-        # Also handle the old format [YYYY-MM-DD HH:MM:SS]
         plain = re.sub(r'\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]', '', plain)
-        # Remove separator lines
         plain = plain.replace('---', '')
-        # Collapse whitespace
         plain = re.sub(r'\s+', ' ', plain).strip()
         return plain
 
@@ -251,17 +240,18 @@ class ERPNextService:
             "email_id": lead_data.get("email", ""),
             "mobile_no": lead_data.get("phone", ""),
             "company_name": lead_data.get("company_name", ""),
+            "country": lead_data.get("country", ""),
             "custom_bot_service": formatted_note,
             "source": "Bot",
         }
-        # Convert and include appointment date if provided
+        
         erp_date = cls._convert_date_to_erp_format(lead_data.get("appointment_date", ""))
         if erp_date:
             payload["custom_appointment_date"] = erp_date
         if full_notes:
             payload["notes"] = [{"note": full_notes}]
 
-        # Strip out empty fields so ERPNext doesn't validate empty strings
+      
         payload = {k: v for k, v in payload.items() if v}
         headers = cls._get_headers()
 
@@ -285,8 +275,7 @@ class ERPNextService:
                     f"Status: {status_code}, Response: {error_body}, "
                     f"Payload sent: {json.dumps(payload, default=str)}"
                 )
-                # For client errors (4xx), return a failure result instead of raising
-                # so the caller can decide whether to retry on a future turn
+
                 if 400 <= status_code < 500:
                     return {"success": False, "detail": error_body, "status_code": status_code}
                 raise
@@ -306,7 +295,7 @@ class ERPNextService:
         full_notes = lead_data.get("notes", "")
         headers = cls._get_headers()
 
-        # Fetch existing lead's custom_bot_service value
+
         existing_custom_bot_service = ""
         async with httpx.AsyncClient(timeout=10, verify=settings.ERPNEXT_SSL_VERIFY) as client:
             try:
@@ -320,12 +309,10 @@ class ERPNextService:
             except Exception as e:
                 logger.error(f"Error fetching existing lead details for {lead_id} from ERPNext: {e}")
 
-        # Determine the updated custom_bot_service value
+       
         if full_notes:
             clean_note = full_notes.strip()
-            # Extract plain text from existing entries for robust dedup comparison
             existing_plain = cls._extract_plain_notes(existing_custom_bot_service)
-            # Only append if the note content is genuinely new
             if clean_note and clean_note not in existing_plain:
                 new_entry = cls._format_bot_service_entry(full_notes)
                 if existing_custom_bot_service:
@@ -343,17 +330,17 @@ class ERPNextService:
             "email_id": lead_data.get("email", ""),
             "mobile_no": lead_data.get("phone", ""),
             "company_name": lead_data.get("company_name", ""),
+            "country": lead_data.get("country", ""),
             "custom_bot_service": updated_custom_bot_service,
             "source": "Bot",
         }
-        # Convert and include appointment date if provided
+
         erp_date = cls._convert_date_to_erp_format(lead_data.get("appointment_date", ""))
         if erp_date:
             payload["custom_appointment_date"] = erp_date
         if full_notes:
             payload["notes"] = [{"note": full_notes}]
 
-        # Strip out empty fields
         payload = {k: v for k, v in payload.items() if v}
 
         async with httpx.AsyncClient(timeout=15, verify=settings.ERPNEXT_SSL_VERIFY) as client:
@@ -398,3 +385,5 @@ class ERPNextService:
             except Exception as e:
                 logger.error(f"ERPNext lead deletion error: {e}")
                 raise
+
+

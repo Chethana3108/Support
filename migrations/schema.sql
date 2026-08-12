@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS lead_state (
     company_name TEXT DEFAULT '',
     email TEXT DEFAULT '',
     phone TEXT DEFAULT '',
+    country TEXT DEFAULT '',
     notes TEXT DEFAULT '',
     lead_saved BOOLEAN DEFAULT FALSE,
     lead_id TEXT
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS website_chunks (
     title TEXT NOT NULL,
     content TEXT NOT NULL,
     embedding vector(384) NOT NULL,
+    metadata JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

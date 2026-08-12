@@ -13,8 +13,8 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import get_db, AsyncSessionLocal
-from app.models import Message, Conversation
-from app.schemas import ChatRequest, ChatResponse, SourceInfo, LeadStateSchema, ExpectedInputSchema
+from app.models import Message, Conversation, LeadState
+from app.schemas import ChatRequest, ChatResponse, SourceInfo, CaseStudyInfo, LeadStateSchema, LeadFormSchema, LeadFormField
 from app.services.knowledge import KnowledgeService
 from app.services.memory import MemoryService
 from app.services.lead import LeadService
@@ -26,79 +26,79 @@ logger = logging.getLogger("biztechbot")
 router = APIRouter(prefix="/api", tags=["Chat"])
 
 SYSTEM_PROMPT = textwrap.dedent("""\
-You are BizBot — the official AI sales assistant for Biztechnosys, a Sitecore Gold Partner \
+You are BizBot — the AI sales assistant for Biztechnosys, a Sitecore Gold Partner \
 and digital experience engineering company based in Bengaluru, India.
 
-## Your Primary Goal
-You have TWO missions that you must execute:
-1. **HELP** the visitor by understanding their business challenges, answering questions, \
-and recommending the most suitable Biztechnosys solutions.
-2. **COLLECT LEAD** information by naturally engaging the user and proactively asking for \
-their details during the conversation.
+## Your Mission
+Execute a **focused 4-step conversation** to understand the visitor's needs, recommend the right \
+solution, and collect their contact details — with ZERO wasted turns.
 
-## How to Collect Leads (CRITICAL)
-You must collect these fields one by one, woven naturally into conversation:
-- **lead_name**: Ask for their name (e.g., "By the way, **may I know your name so I can \
-personalize our conversation?**")
-- **company_name**: Ask what company/organization they're from (e.g., "**Which organization are \
-you with?** That helps me tailor my recommendations.")
-- **email**: Optionally ask for their email to send details or schedule a call (e.g., "I'd love to share \
-a detailed proposal — **what's the best email to reach you?**")
-- **appointment_date**: After getting their email, ask if they'd like to book an appointment date \
-(e.g., "**Would you like to book an appointment for a consultation? What date works best for you? (DD-MM-YYYY)**"). \
-The user should provide the date in DD-MM-YYYY format.
-- **phone**: Optionally ask for phone (e.g., "**Would you like our expert to call you?** If so, \
-**what's a good number?**")
+## Conversation Flow (STRICT — follow these phases in order)
 
-### Lead Collection Rules:
-- **MIND MINDFULLY FIRST**: At the start of the conversation (first few turns), do NOT ask for any contact info (name, email, company, phone). Focus entirely on understanding their business requirements, answering their questions, and showing competence.
-- **START LATER**: Only begin asking for lead details (starting with name) after you have had a meaningful exchange and provided initial value (typically from the 3rd or 4th turn onwards).
-- Ask for ONE detail at a time, spread across messages.
-- NEVER ask for all details at once — that feels like a form and kills engagement.
-- ALWAYS provide value FIRST (answer their question), THEN ask for a detail.
-- Frame each ask as helping THEM (send info, schedule call, personalize advice).
-- If the user declines to share something, respect it and move on — don't push.
+### Phase 1 — PROJECT DISCOVERY (Your first response)
+- Skip lengthy greetings. Use ONE warm line, then IMMEDIATELY ask what project or business \
+need brought them here.
+- Example: "Hi! 👋 **What project or business challenge are you looking to solve?**"
+- Do NOT ask for name, email, or any contact info yet.
 
-### Lead & Fact Reporting (ABSOLUTELY MANDATORY — NEVER SKIP THIS):
-⚠️ THIS IS THE MOST IMPORTANT INSTRUCTION. YOU MUST FOLLOW THIS ON EVERY SINGLE RESPONSE WITHOUT EXCEPTION.
+### Phase 2 — PRE-SALES QUALIFYING (After they describe their project)
+- Ask **1-2 brief, targeted** qualifying questions relevant to what they described.
+- Examples: "**Is this a new build or a migration?**", "**Do you have a timeline in mind?**", \
+"**What's your current platform/tech stack?**"
+- Keep it to 1-2 questions MAX. Do NOT interrogate.
 
-After EVERY response, you MUST output a JSON status block at the very end. This is NOT optional.
-Even if no new information was collected, you MUST still output this block with whatever you know so far.
-If the user has mentioned their name or company at ANY point in the conversation, you MUST include it.
+### Phase 3 — RECOMMENDATION (After they answer qualifying questions)
+- Recommend the **best-fit Biztechnosys service/product** from the knowledge base context.
+- Explain briefly WHY it fits their specific needs (2-3 bullet points max).
+- If a relevant case study exists in the "Relevant Case Studies" section, summarize its \
+business outcomes and provide the exact link.
+- **CRITICAL**: If no matching case study is provided in context, do NOT invent one. \
+Only use what is explicitly provided.
+- After your recommendation, naturally transition to asking them to fill in their details: \
+"**Could you please fill in your details below so our team can prepare a tailored proposal?**"
 
-Format — output EXACTLY this structure on its own line at the very end:
+### Phase 4 — APPOINTMENT BOOKING & POST-LEAD (After form submission)
+- Once the user submits their contact details (lead is saved), thank them warmly.
+- Prompt them to book a Discovery Call with the team using the inline form: "**Please select your preferred date and time slot in the booking form below to book a Discovery Call with our team.**"
+- Set "expected_input" to "booking_form" in the JSON status block.
+
+### Post-Lead Rules (STRICT):
+- If the user asks **follow-up questions about the SAME requirement** that was already \
+recommended (e.g., pricing details, technical specifics, timelines for the same service), \
+do NOT answer in detail. Instead say: "Our experts will connect with you shortly to \
+discuss the details. **Is there any other project or requirement you'd like to explore?**"
+- If the user mentions a **NEW requirement or different project**, treat it as a fresh \
+request: recommend the appropriate service/product, include a case study if available, \
+and UPDATE the "notes" field in your JSON block with the new requirement.
+- If the user says no or wraps up, say goodbye warmly and end the conversation.
+
+## Lead JSON Status Block (MANDATORY — EVERY response)
+After EVERY response, output this JSON block at the very end on its own line:
 ```json
-{"lead_name":"...","email":"...","appointment_date":"...","phone":"...","company_name":"...","notes":"...","ready":true/false,"facts":["..."],"expected_input":"lead_name" | "company_name" | "email" | "appointment_date" | "phone" | null}
+{"lead_name":"...","email":"...","appointment_date":"...","phone":"...","company_name":"...","country":"...","notes":"...","ready":true/false,"facts":["..."],"expected_input":"lead_form"|"booking_form"|null}
 ```
 
-Rules for filling this JSON:
-- "lead_name": The person's name. If they said "I'm Suma" or "My name is John", put that name here.
-- "company_name": Their organization. If they said "I work at Pfizer" or "We are from Google", put that here.
-- "email": Their email address if shared. Use "" if not yet collected.
-- "appointment_date": The appointment date in DD-MM-YYYY format if shared. Use "" if not yet collected.
-- "phone": Their phone number if shared. Use "" if not yet collected.
-- "notes": Brief summary of what the user is looking for / their requirements. If the user's requirements or challenges change during the conversation (e.g. they switch to a different service/project topic), you MUST update this summary to reflect their new/updated requirements. Otherwise, keep the summary focused on the core project topic and avoid minor wording fluctuations from turn to turn.
-- "ready": Set to true when you have BOTH lead_name AND company_name. Otherwise false.
-- "facts": List of 1-3 new core user facts learned this turn.
-- "expected_input": The field you are explicitly asking the user for in this response (must be one of: "lead_name", "company_name", "email", "appointment_date", "phone"). If you are not asking the user for any of these contact details in this turn, set this to null.
-
-
-⚠️ CRITICAL: If the user has ALREADY shared their name or company in a PREVIOUS message in the conversation,
-you MUST still include those values in the JSON block. Do NOT leave them blank just because they were
-mentioned in an earlier turn. Always report ALL information you know.
+Rules:
+- Fill fields with whatever the user has shared so far. Use "" for uncollected fields.
+- "notes": Brief summary of the user's project/requirements. Update if their requirements change.
+- "ready": true when BOTH lead_name AND company_name are non-empty.
+- "facts": 1-3 new facts learned this turn.
+- "expected_input": 
+  - Set to "lead_form" ONLY after you have recommended a specific Biztechnosys service/product.
+  - Set to "booking_form" AFTER contact details are collected, inviting them to schedule a call.
+  - Otherwise set to null.
+- ALWAYS carry forward previously collected info — never blank out known fields.
 
 ## Knowledge Base
-You ONLY answer based on the context provided below. If the context doesn't have relevant \
-information, say you'll connect them with an expert who can help.
+Answer ONLY from the context provided. If context lacks relevant info, say you'll \
+connect them with an expert.
 
 ## Response Style
-- Be conversational, warm, professional — like a knowledgeable sales consultant.
-- Use bullet points for clarity when listing services or benefits.
-- When suggesting solutions, explain WHY it fits their specific needs.
-- Keep responses concise (2-4 short paragraphs).
+- Conversational, warm, professional — like a knowledgeable sales consultant.
+- Use bullet points for listing services/benefits.
+- Keep responses **concise** (2-3 short paragraphs max). No walls of text.
 - ALWAYS respond in the language the user writes in.
-- Once in the lead collection phase, after answering a question, naturally transition to collecting the next lead field.
-- **CRITICAL: Bold all questions you ask the user.** Whenever you ask a question (including when asking for their name, organization/company, email, or phone number), you must format that question in bold markdown (e.g., `**What is your name?**` or `**Which organization are you with?**`). This applies to ANY question you ask.
+- **Bold all questions you ask.**
 """)
 
 def _extract_json_by_braces(text: str, start: int) -> Optional[str]:
@@ -177,157 +177,60 @@ def extract_lead_json(text: str) -> Optional[dict]:
     return None
 
 
-def map_expected_input(field_name: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not field_name:
-        return None
-    field_clean = field_name.strip().lower()
-    
-    if field_clean in ("lead_name", "name", "full_name", "fullname", "first_name", "last_name", "client_name", "visitor_name", "customer_name"):
-        return {
-            "field": "lead_name",
-            "input_type": "text",
-            "label": "Full Name",
-            "placeholder": "Your Full Name",
-            "required": True
-        }
-    elif field_clean in ("company_name", "company", "org", "organization", "business", "firm", "companyname", "org_name", "organization_name"):
-        return {
-            "field": "company_name",
-            "input_type": "text",
-            "label": "Organization",
-            "placeholder": "Company Name",
-            "required": True
-        }
-    elif field_clean in ("email", "email_address", "mail", "emailaddress"):
-        return {
-            "field": "email",
-            "input_type": "email",
-            "label": "Email Address",
-            "placeholder": "Enter your email",
-            "required": True
-        }
-    elif field_clean in ("appointment_date", "date", "appointment"):
-        return {
-            "field": "appointment_date",
-            "input_type": "date",
-            "label": "Appointment Date",
-            "placeholder": "DD-MM-YYYY",
-            "required": True
-        }
-    elif field_clean in ("phone", "tel", "phone_number", "telephone", "mobile", "contact", "contact_number", "phonenumber"):
-        return {
-            "field": "phone",
-            "input_type": "tel",
-            "label": "Phone Number",
-            "placeholder": "Enter your phone number",
-            "required": True
-        }
-    return None
+# ─── Lead form definition: all possible form fields ───
+ALL_LEAD_FORM_FIELDS = [
+    LeadFormField(field="lead_name", input_type="text", label="Full Name", placeholder="Your Full Name", required=True),
+    LeadFormField(field="company_name", input_type="text", label="Organization", placeholder="Company Name", required=True),
+    LeadFormField(field="email", input_type="email", label="Email Address", placeholder="Enter your email", required=True),
+    LeadFormField(field="phone", input_type="tel", label="Phone Number", placeholder="Enter your phone number", required=False),
+    LeadFormField(field="country", input_type="text", label="Country", placeholder="Enter your country", required=True),
+    LeadFormField(field="appointment_date", input_type="date", label="Appointment Date", placeholder="DD-MM-YYYY", required=False),
+]
 
 
-def validate_expected_input(mapped: Dict[str, Any], reply: str) -> bool:
-    """Validate that the assistant's reply is *explicitly asking* for the given field.
+def build_lead_form(lead_state_dict: Dict[str, Any]) -> Optional[LeadFormSchema]:
+    """Build a lead form containing only the fields that have NOT been collected yet.
     
-    Uses strict regex phrase patterns so that generic mentions of words like
-    'name', 'company', or 'call' in unrelated contexts do NOT trigger
-    expected_input.  Only explicit questions directed at the user will match.
+    Returns None if all fields are already filled.
     """
-    if not mapped or not reply:
+    missing_fields = []
+    for field_def in ALL_LEAD_FORM_FIELDS:
+        current_val = lead_state_dict.get(field_def.field, "")
+        if not current_val or not str(current_val).strip():
+            missing_fields.append(field_def)
+    
+    if not missing_fields:
+        return None
+    
+    return LeadFormSchema(fields=missing_fields)
+
+
+def validate_lead_form_request(reply: str) -> bool:
+    """Validate that the assistant's reply is explicitly asking the user to fill in their details.
+    
+    Checks for phrases that indicate the bot is requesting the user to fill a contact form.
+    """
+    if not reply:
         return False
-    field = mapped.get("field")
     reply_lower = reply.lower()
-
-    # Each pattern list contains regex phrases that indicate the bot is
-    # explicitly requesting that piece of information from the user.
-    if field == "lead_name":
-        patterns = [
-            r"\byour\s+(?:good\s+)?name\b",
-            r"\bmay\s+i\s+(?:know|have)\s+your\s+name\b",
-            r"\bwhat(?:'s|\s+is)\s+.*?\bname\b",
-            r"\bwho\s+(?:am\s+i\s+speaking|is\s+this)\b",
-            r"\bhow\s+(?:should|shall|can|may)\s+i\s+(?:address|call)\s+you\b",
-            r"\bintroduce\s+yourself\b",
-            r"\bwhat\s+(?:should|shall|can|may)\s+i\s+call\s+you\b",
-            r"\bcould\s+(?:you\s+)?(?:share|tell\s+me)\s+your\s+name\b",
-            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|tell\s+me|provide)\s+.*?\bname\b",
-            r"\bi(?:'d|\s+would)\s+love\s+to\s+know\s+your\s+name\b",
-            r"\bpersonalize\b.*\byour\s+name\b",
-            r"\bknow\s+your\s+name\b",
-        ]
-        return any(re.search(p, reply_lower) for p in patterns)
-
-    elif field == "company_name":
-        patterns = [
-            r"\bwhich\s+(?:organization|company|firm|business)\b",
-            r"\bwhat(?:'s|\s+is)\s+.*?\b(?:organization|company|firm|business)\b",
-            r"\bwhat\s+(?:organization|company|firm)\b.*\b(?:are\s+you|do\s+you)\b",
-            r"\bwh(?:ich|at)\s+(?:organization|company|firm)\s+(?:are\s+you|do\s+you)\b",
-            r"\byou\s+(?:associated|affiliated)\s+with\b",
-            r"\bwhere\s+do\s+you\s+work\b",
-            r"\bwho\s+do\s+you\s+(?:work\s+for|represent)\b",
-            r"\byou\s+work\s+(?:for|at|with)\b.*\?",
-            r"\byour\s+(?:organization|company|firm|business)\b.*\?",
-            r"\bcould\s+(?:you\s+)?(?:share|tell\s+me)\s+(?:your\s+)?(?:organization|company)\b",
-            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|tell\s+me|provide)\s+.*?\b(?:organization|company|firm|business)\b",
-            r"\bknow\s+(?:your|which)\s+(?:organization|company)\b",
-        ]
-        return any(re.search(p, reply_lower) for p in patterns)
-
-    elif field == "email":
-        patterns = [
-            r"\byour\s+(?:email|e-mail)\b",
-            r"\bwhat(?:'s|\s+is)\s+.*?\b(?:email|e-mail)\b",
-            r"\bshare\s+(?:your\s+)?(?:email|e-mail)\b",
-            r"\b(?:share|provide)\s+.*?\b(?:email|e-mail)\b",
-            r"\bbest\s+(?:email|e-mail)\s+to\s+reach\b",
-            r"\bemail\s+(?:address|id)\b.*\?",
-            r"\bsend\s+(?:you|it|details|info|proposal|brochure)\b.*\b(?:email|e-mail|inbox)\b",
-            r"\b(?:email|e-mail)\b.*\bsend\b.*\?",
-            r"\breach\s+you\b.*\b(?:email|e-mail)\b",
-            r"\b(?:email|e-mail)\b.*\breach\s+you\b",
-            r"\bcould\s+(?:you\s+)?(?:share|provide)\s+(?:your\s+)?(?:email|e-mail)\b",
-            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|provide)\s+.*?\b(?:email|e-mail)\b",
-        ]
-        return any(re.search(p, reply_lower) for p in patterns)
-
-    elif field == "appointment_date":
-        patterns = [
-            r"\bbook\s+(?:an?\s+)?appointment\b",
-            r"\bappointment\s+date\b",
-            r"\bschedule\s+(?:an?\s+)?(?:appointment|meeting|consultation|call|session)\b",
-            r"\bwhat\s+date\b.*\b(?:works?|prefer|suit|convenient)\b",
-            r"\bpreferred?\s+date\b",
-            r"\bwhen\s+would\s+you\s+(?:like|prefer)\b",
-            r"\bpick\s+a\s+date\b",
-            r"\bchoose\s+a\s+date\b",
-            r"\bdate\s+(?:works?|suits?)\s+(?:best|you)\b",
-            r"\bconvenient\s+date\b",
-            r"\bdd-mm-yyyy\b",
-        ]
-        return any(re.search(p, reply_lower) for p in patterns)
-
-    elif field == "phone":
-        patterns = [
-            r"\byour\s+(?:phone|mobile|contact|cell)\s*(?:number)?\b.*\?",
-            r"\bwhat(?:'s|\s+is)\s+.*?\b(?:phone|mobile|contact|cell)\s*(?:number)?\b",
-            r"\bshare\s+(?:your\s+)?(?:phone|mobile|contact)\s*(?:number)?\b",
-            r"\b(?:share|provide)\s+.*?\b(?:phone|mobile|contact|cell)\s*(?:number)?\b",
-            r"\bgood\s+(?:number|phone)\s+to\s+(?:reach|call|contact)\b",
-            r"\bgood\s+.*?(?:number|phone|mobile|contact)\s+to\s+(?:reach|call|contact)\b",
-            r"\bcall\s+you\b.*\b(?:number|phone|mobile|contact)\b",
-            r"\b(?:number|phone|mobile|contact)\b.*\bcall\s+you\b",
-            r"\bour\s+(?:expert|team|consultant|sitecore\s+expert)\s+.*?\bcall\s+you\b",
-            r"\bgive\s+(?:you|them)\s+a\s+call\b.*\b(?:number|phone)\b",
-            r"\bgive\s+.*?\bcall\b.*\b(?:number|phone|mobile|contact)\b",
-            r"\b(?:number|phone|mobile|contact)\b.*\bgive\s+.*?\bcall\b",
-            r"\bwould\s+you\s+like\s+(?:a\s+)?call\b",
-            r"\bcould\s+(?:you\s+)?(?:share|provide)\s+(?:your\s+)?(?:phone|mobile|contact)\b",
-            r"\b(?:could\s+(?:you\s+)?(?:also\s+|kindly\s+|please\s+)?|please\s+)?(?:share|provide)\s+.*?\b(?:phone|mobile|contact|cell)\b",
-            r"\bphone\s+number\s+where\s+we\s+can\s+reach\s+you\b",
-        ]
-        return any(re.search(p, reply_lower) for p in patterns)
-
-    return False
+    
+    patterns = [
+        r"\bfill\s+in\s+(?:your\s+)?details\b",
+        r"\byour\s+details\s+(?:below|here)\b",
+        r"\bshare\s+(?:your\s+)?(?:contact\s+)?details\b",
+        r"\bprovide\s+(?:your\s+)?(?:contact\s+)?details\b",
+        r"\bcontact\s+(?:details|information|info)\b",
+        r"\bform\s+below\b",
+        r"\bfill\s+(?:out|in)\s+(?:the\s+)?form\b",
+        r"\byour\s+(?:information|info)\s+(?:below|here)\b",
+        r"\bfill\s+(?:these|the)\s+details\b",
+        r"\bshare\s+(?:the\s+)?following\s+(?:details|information)\b",
+        r"\bpersonalize\b.*\bdetails\b",
+        r"\blearn\s+more\s+about\s+you\b",
+        r"\bget\s+(?:back|in\s+touch)\b.*\bdetails\b",
+        r"\b(?:could|can|would)\s+you\s+(?:please\s+)?(?:share|provide|fill)\b.*\b(?:details|information)\b",
+    ]
+    return any(re.search(p, reply_lower) for p in patterns)
 
 
 async def fallback_extract_lead_from_conversation(
@@ -351,27 +254,28 @@ async def fallback_extract_lead_from_conversation(
 
     extraction_prompt = textwrap.dedent(f"""\
     Analyze the following conversation and extract any lead/contact information mentioned by the USER,
-    as well as determining the next expected input from the assistant's latest reply.
+    as well as determining whether the assistant is asking the user to fill in their contact details.
     Look for:
     - The user's name (e.g., "I'm Suma", "My name is John", or when the assistant addresses them by name)
     - Their company/organization (e.g., "I work at Pfizer", "We are from Google", "our company XYZ")
     - Email address
     - Appointment date (in DD-MM-YYYY format)
     - Phone number
+    - Country
     - What they are looking for (notes/requirements)
-    - The expected input (which field the assistant is asking for in the latest ASSISTANT reply)
+    - Whether the assistant is asking the user to fill a contact form (expected_input)
 
     Conversation:
     {conversation_text}
 
     Respond with ONLY a JSON object in this exact format, nothing else:
-    {{"lead_name":"...","company_name":"...","email":"...","appointment_date":"...","phone":"...","notes":"...","ready":true/false,"facts":[],"expected_input":"lead_name" | "company_name" | "email" | "appointment_date" | "phone" | null}}
+    {{"lead_name":"...","company_name":"...","email":"...","appointment_date":"...","phone":"...","country":"...","notes":"...","ready":true/false,"facts":[],"expected_input":"lead_form" | null}}
 
     Rules:
     - Use "" for any field not mentioned in the conversation.
     - Set "ready" to true if BOTH lead_name and company_name are non-empty.
     - Only extract information that the USER explicitly stated. Do NOT guess or hallucinate.
-    - Set "expected_input" to the field name that the assistant explicitly asked for in the latest ASSISTANT reply ("lead_name", "company_name", "email", "appointment_date", "phone", or null).
+    - Set "expected_input" to "lead_form" if the assistant is asking the user to fill in their contact details/form in the latest ASSISTANT reply. Otherwise set it to null.
     """)
 
     try:
@@ -537,6 +441,7 @@ async def process_post_chat(
         "email": lead_state.email,
         "appointment_date": lead_state.appointment_date,
         "phone": lead_state.phone,
+        "country": lead_state.country,
         "notes": lead_state.notes,
     }
 
@@ -547,8 +452,12 @@ async def build_dynamic_prompt(
     session_id: str,
     user_id: str,
     user_message: str
-) -> tuple[str, List[Dict[str, Any]], List[Message]]:
-    """Builds the fully context-enriched system prompt including RAG and user memories."""
+) -> tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], List[Message]]:
+    """Builds the fully context-enriched system prompt including RAG, user memories, and case studies.
+    
+    Returns:
+        Tuple of (system_prompt, knowledge_results, case_study_results, recent_messages)
+    """
     # 1. Get/Create conversation metadata
     conv = await MemoryService.create_conversation_if_not_exists(db, session_id, user_id)
 
@@ -588,25 +497,24 @@ async def build_dynamic_prompt(
         [f"[Source: {k['title']}]\n{k['text']}\nLink: {k['url']}" for k in knowledge_results]
     ) if knowledge_results else "No specific website knowledge found."
 
-    # 6. Count User Messages to set Mindful Talk turn rules
+    # 6. Retrieve Relevant Case Studies (dedicated search over case_study-tagged chunks with lowered threshold)
+    case_study_results = await KnowledgeService.search_case_studies(
+        db,
+        query=user_message,
+        candidate_k=10,
+        final_k=2,
+        threshold=0.30,
+    )
+    case_study_text = "\n\n---\n\n".join(
+        [f"[Case Study: {cs['title']}]\n{cs['text']}\nRead more: {cs['url']}" for cs in case_study_results]
+    ) if case_study_results else "No relevant case studies found."
+
+    # 7. Count User Messages to determine conversation phase
     stmt = select(Message).where(Message.conversation_id == session_id, Message.role == "user")
     user_msg_result = await db.execute(stmt)
     user_msg_count = len(user_msg_result.scalars().all()) + 1
 
-    if user_msg_count <= settings.MINDFUL_TALK_TURNS:
-        phase_instruction = (
-            f"\n\n## CURRENT PHASE: MINDFUL TALK (Turn {user_msg_count})\n"
-            "DO NOT ask for any lead/contact details (name, email, company, phone) yet. "
-            "Focus completely on answering the user's questions and understanding their business requirements."
-        )
-    else:
-        phase_instruction = (
-            f"\n\n## CURRENT PHASE: LEAD COLLECTION (Turn {user_msg_count})\n"
-            "You may now naturally and smartly start collecting lead details (starting with name, then company) "
-            "woven into your replies. Remember to ask for only ONE detail at a time, provide value first, and never push."
-        )
-
-    # 7. Formulate current lead status
+    # 8. Formulate current lead status
     lead_state = await LeadService.get_or_create_lead_state(db, session_id, user_id)
     lead_status_json = {
         "lead_name": lead_state.lead_name,
@@ -614,10 +522,68 @@ async def build_dynamic_prompt(
         "email": lead_state.email,
         "appointment_date": lead_state.appointment_date,
         "phone": lead_state.phone,
+        "country": lead_state.country,
         "notes": lead_state.notes,
     }
 
-    # 8. Assemble components
+    # 9. Determine phase based on state in DB and conversation history
+    has_recommendation = False
+    for msg in recent_messages:
+        if msg.role == "assistant" and any(keyword in msg.content.lower() for keyword in ["recommend", "biztechnosys", "sitecore"]):
+            has_recommendation = True
+
+    if lead_state.appointment_date:
+        phase_instruction = (
+            f"\n\n## CURRENT PHASE: POST-LEAD & BOOKED (Turn {user_msg_count})\n"
+            f"The user has submitted contact details AND booked an appointment for {lead_state.appointment_date}. "
+            "Follow the Post-Lead Rules strictly:\n"
+            "- If the user asks follow-up questions about the SAME requirement/service, "
+            "say our experts will discuss everything in detail during the scheduled call.\n"
+            "- If the user mentions a NEW/DIFFERENT requirement, recommend the best-fit service, "
+            "include a case study if available, and UPDATE the 'notes' field in your JSON block.\n"
+            "- If the user says no or is wrapping up, say goodbye warmly."
+        )
+    elif lead_state.lead_saved:
+        phase_instruction = (
+            f"\n\n## CURRENT PHASE: DISCOVERY CALL INVITATION & BOOKING (Turn {user_msg_count})\n"
+            "The lead is successfully created in ERP/CRM. You must now ask the user:\n"
+            "\"Would you like to schedule a free discovery call with our team?\"\n"
+            "Rules for this phase:\n"
+            "1. If the customer declines/says no: End the conversation gracefully and set expected_input to null.\n"
+            "2. If the customer agrees/says yes:\n"
+            f"   - Check if we have their email address. Current email in DB is: '{lead_state.email}'.\n"
+            "   - If their email is empty/missing, you MUST ask them to provide their email address first before booking. Do NOT set expected_input to 'booking_form' yet.\n"
+            "   - If/once we have their email, prompt them to book using the inline form and set expected_input to 'booking_form'.\n"
+        )
+    elif has_recommendation:
+        phase_instruction = (
+            f"\n\n## CURRENT PHASE: LEAD CAPTURE (Turn {user_msg_count})\n"
+            "You have recommended the best-fit service/product.\n"
+            "Ask the user to fill in their details in the form below so the team can prepare a proposal.\n"
+            "Set expected_input to \"lead_form\" in the JSON block."
+        )
+    elif user_msg_count <= 1:
+        phase_instruction = (
+            f"\n\n## CURRENT PHASE: PROJECT DISCOVERY (Turn {user_msg_count})\n"
+            "This is the first response. Use ONE warm greeting line, then IMMEDIATELY ask "
+            "what project or business challenge brought them here. "
+            "Do NOT ask for contact details or recommend products yet."
+        )
+    else:
+        phase_instruction = (
+            f"\n\n## CURRENT PHASE: PRE-SALES QUALIFYING & ANALYSIS (Turn {user_msg_count})\n"
+            "Analyze the user's requirements. If additional information is needed, ask intelligent "
+            "pre-sales qualification questions one by one or in small sets to better understand: "
+            "business domain, project type, challenges, budget, timeline, technical requirements.\n"
+            "Continue asking questions until you have enough context to make an accurate recommendation.\n"
+            "Once you have sufficient context to make a recommendation, transition immediately to the recommendation step:\n"
+            "1. Recommends the most suitable Biztechnosys service(s) or product(s).\n"
+            "2. Explains why it fits.\n"
+            "3. Shares relevant case studies if available in context.\n"
+            "4. Asks the user to fill in their details in the lead form, and sets expected_input to \"lead_form\"."
+        )
+
+    # 10. Assemble components
     prompt_builder = [SYSTEM_PROMPT]
     
     if conv.summary:
@@ -626,14 +592,11 @@ async def build_dynamic_prompt(
     prompt_builder.append(f"\n\n## User Profile (Episodic Memory)\n{episodic_text}")
     prompt_builder.append(f"\n\n## Retrieved Conversation Memory (Relevant Past Context)\n{memory_text}")
     prompt_builder.append(f"\n\n## Retrieved Website Knowledge\n{knowledge_text}")
+    prompt_builder.append(f"\n\n## Relevant Case Studies\n{case_study_text}")
     prompt_builder.append(f"\n\n## Current Lead Status (already collected)\n{json.dumps(lead_status_json)}")
     prompt_builder.append(phase_instruction)
-    prompt_builder.append(
-        "\n\nRemember: provide value first, then ask for the NEXT missing field if in the lead collection phase. "
-        "Don't re-ask for fields already collected."
-    )
 
-    return "".join(prompt_builder), knowledge_results, recent_messages
+    return "".join(prompt_builder), knowledge_results, case_study_results, recent_messages
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -652,8 +615,100 @@ async def chat(
     session_id = req.session_id or str(uuid.uuid4())
     user_id = req.user_id or str(uuid.uuid4())
 
+    # Check if this is an inline booking submission
+    booking_match = re.match(r"^Submit Booking:\s*Date:\s*([\d-]+),\s*Time:\s*(.+)$", req.message.strip(), re.IGNORECASE)
+    if booking_match:
+        booking_date = booking_match.group(1).strip()
+        booking_time = booking_match.group(2).strip()
+        
+        # 1. Fetch Lead State
+        stmt = select(LeadState).where(LeadState.conversation_id == session_id)
+        res = await db.execute(stmt)
+        lead_state = res.scalar_one_or_none()
+        
+        if not lead_state:
+            lead_state = LeadState(
+                conversation_id=session_id,
+                lead_name="Valued Client",
+                email="client@example.com",
+                company_name="",
+                notes=""
+            )
+            db.add(lead_state)
+            await db.commit()
+            
+        lead_name = lead_state.lead_name or "Valued Client"
+        user_email = lead_state.email or "client@example.com"
+        company_name = lead_state.company_name or ""
+        notes = lead_state.notes or ""
+        
+        formatted_appointment = f"{booking_date} {booking_time}"
+        lead_state.appointment_date = formatted_appointment
+        
+        # Schedule Outlook Event
+        from app.services.outlook import OutlookService
+        calendar_success = await OutlookService.create_calendar_event(
+            lead_name=lead_name,
+            user_email=user_email,
+            company_name=company_name,
+            date_str=booking_date,
+            time_str=booking_time,
+            notes=notes
+        )
+        
+        # Send Confirmation Email
+        email_success = await OutlookService.send_confirmation_emails(
+            lead_name=lead_name,
+            user_email=user_email,
+            company_name=company_name,
+            date_str=booking_date,
+            time_str=booking_time,
+            notes=notes
+        )
+        
+        # Save to DB and sync to ERPNext
+        await db.commit()
+        try:
+            await LeadService.sync_lead_to_erpnext(db, lead_state, newly_filled=True)
+        except Exception as e:
+            logger.error(f"Error syncing appointment date to ERPNext: {e}")
+            
+        confirmation_msg = (
+            f"🎉 **Discovery Call Confirmed!**\n\n"
+            f"Your appointment with the Biztechnosys team is scheduled for **{booking_date} at {booking_time}** (IST).\n\n"
+            f"A calendar invitation and confirmation email have been sent to **{user_email}** and **chethana@biztechnosys.com**.\n\n"
+            f"**Do you have any other project or requirement we can help you with?**"
+        )
+        
+        # Add messages to chat memory
+        await MemoryService.store_message_and_embed(db, session_id, user_id, "user", req.message)
+        await MemoryService.store_message_and_embed(db, session_id, user_id, "assistant", confirmation_msg)
+        
+        lead_data = {
+            "lead_name": lead_state.lead_name,
+            "company_name": lead_state.company_name,
+            "email": lead_state.email,
+            "appointment_date": lead_state.appointment_date,
+            "phone": lead_state.phone,
+            "country": lead_state.country,
+            "notes": lead_state.notes,
+        }
+        
+        return ChatResponse(
+            reply=confirmation_msg,
+            session_id=session_id,
+            user_id=user_id,
+            sources=[],
+            case_studies=[],
+            lead_collected=LeadStateSchema(**lead_data),
+            lead_saved=lead_state.lead_saved,
+            lead_form=None,
+            booking_form=None,
+            conversation_complete=True
+        )
+
     # Compile prompt and context
-    system_prompt, knowledge_results, recent_messages = await build_dynamic_prompt(
+    system_prompt, knowledge_results, case_study_results, recent_messages = await build_dynamic_prompt(
         db, session_id, user_id, req.message
     )
 
@@ -690,6 +745,9 @@ async def chat(
         background_tasks=background_tasks
     )
 
+    # Fetch lead_state to fix NameError below
+    lead_state = await LeadService.get_or_create_lead_state(db, session_id, resolved_user_id)
+
     # Build sources info list
     sources = []
     seen_urls = set()
@@ -698,27 +756,46 @@ async def chat(
             sources.append(SourceInfo(title=r["title"], url=r["url"], score=round(r["score"], 3)))
             seen_urls.add(r["url"])
 
-    # Map expected input
-    expected_input_data = None
+    # Build lead form & booking form
+    lead_form_data = None
+    booking_form_data = None
+
     if lead_json and lead_json.get("expected_input"):
-        # Double check turn rules & ensure assistant reply actually asks for this field
-        stmt = select(Message).where(Message.conversation_id == session_id, Message.role == "user")
-        user_msg_result = await db.execute(stmt)
-        user_msg_count = len(user_msg_result.scalars().all()) + 1
-        
-        if user_msg_count > settings.MINDFUL_TALK_TURNS:
-            mapped = map_expected_input(lead_json["expected_input"])
-            if mapped and validate_expected_input(mapped, clean_reply):
-                expected_input_data = ExpectedInputSchema(**mapped)
+        expected = str(lead_json["expected_input"]).strip().lower()
+        if expected == "lead_form" and not lead_state.lead_saved:
+            lead_form_data = build_lead_form(lead_data)
+        elif expected == "booking_form" and lead_state.lead_saved and not lead_state.appointment_date:
+            booking_form_data = {
+                "button_text": "Book Discovery Call",
+                "title": "Schedule Discovery Call"
+            }
+
+    # Build case studies info list
+    case_studies = []
+    seen_cs_urls = set()
+    for cs in case_study_results:
+        if cs["url"] not in seen_cs_urls:
+            # Use first ~200 chars of text as summary
+            summary_text = cs["text"][:200].rsplit(" ", 1)[0] + "..." if len(cs["text"]) > 200 else cs["text"]
+            case_studies.append(CaseStudyInfo(
+                title=cs["title"],
+                url=cs["url"],
+                summary=summary_text,
+                score=round(cs["score"], 3)
+            ))
+            seen_cs_urls.add(cs["url"])
 
     return ChatResponse(
         reply=clean_reply,
         session_id=session_id,
         user_id=resolved_user_id,
         sources=sources[:3],
+        case_studies=case_studies,
         lead_collected=LeadStateSchema(**lead_data),
         lead_saved=lead_just_saved,
-        expected_input=expected_input_data
+        lead_form=lead_form_data,
+        booking_form=booking_form_data,
+        conversation_complete=lead_just_saved and bool(lead_state.appointment_date)
     )
 
 
@@ -738,8 +815,111 @@ async def chat_stream(
     session_id = req.session_id or str(uuid.uuid4())
     user_id = req.user_id or str(uuid.uuid4())
 
+    # Check if this is an inline booking submission
+    booking_match = re.match(r"^Submit Booking:\s*Date:\s*([\d-]+),\s*Time:\s*(.+)$", req.message.strip(), re.IGNORECASE)
+    if booking_match:
+        booking_date = booking_match.group(1).strip()
+        booking_time = booking_match.group(2).strip()
+        
+        async def event_generator_booking():
+            # 1. Fetch Lead State
+            stmt = select(LeadState).where(LeadState.conversation_id == session_id)
+            res = await db.execute(stmt)
+            lead_state = res.scalar_one_or_none()
+            
+            if not lead_state:
+                lead_state = LeadState(
+                    conversation_id=session_id,
+                    lead_name="Valued Client",
+                    email="client@example.com",
+                    company_name="",
+                    notes=""
+                )
+                db.add(lead_state)
+                await db.commit()
+                
+            lead_name = lead_state.lead_name or "Valued Client"
+            user_email = lead_state.email or "client@example.com"
+            company_name = lead_state.company_name or ""
+            notes = lead_state.notes or ""
+            
+            formatted_appointment = f"{booking_date} {booking_time}"
+            lead_state.appointment_date = formatted_appointment
+            
+            # Schedule Outlook Event
+            from app.services.outlook import OutlookService
+            calendar_success = await OutlookService.create_calendar_event(
+                lead_name=lead_name,
+                user_email=user_email,
+                company_name=company_name,
+                date_str=booking_date,
+                time_str=booking_time,
+                notes=notes
+            )
+            
+            # Send Confirmation Email
+            email_success = await OutlookService.send_confirmation_emails(
+                lead_name=lead_name,
+                user_email=user_email,
+                company_name=company_name,
+                date_str=booking_date,
+                time_str=booking_time,
+                notes=notes
+            )
+            
+            # Save to DB and sync to ERPNext
+            await db.commit()
+            try:
+                await LeadService.sync_lead_to_erpnext(db, lead_state, newly_filled=True)
+            except Exception as e:
+                logger.error(f"Error syncing appointment date to ERPNext: {e}")
+                
+            confirmation_msg = (
+                f"🎉 **Discovery Call Confirmed!**\n\n"
+                f"Your appointment with the Biztechnosys team is scheduled for **{booking_date} at {booking_time}** (IST).\n\n"
+                f"A calendar invitation and confirmation email have been sent to **{user_email}** and **chethana@biztechnosys.com**.\n\n"
+                f"**Do you have any other project or requirement we can help you with?**"
+            )
+            
+            # Add messages to chat memory
+            await MemoryService.store_message_and_embed(db, session_id, user_id, "user", req.message)
+            await MemoryService.store_message_and_embed(db, session_id, user_id, "assistant", confirmation_msg)
+            
+            lead_data = {
+                "lead_name": lead_state.lead_name,
+                "company_name": lead_state.company_name,
+                "email": lead_state.email,
+                "appointment_date": lead_state.appointment_date,
+                "phone": lead_state.phone,
+                "country": lead_state.country,
+                "notes": lead_state.notes,
+            }
+            
+            # Stream response in chunks to simulate typing
+            chunk_size = 20
+            for i in range(0, len(confirmation_msg), chunk_size):
+                chunk = confirmation_msg[i:i+chunk_size]
+                yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
+                await asyncio.sleep(0.05)
+                
+            metadata = {
+                "type": "metadata",
+                "session_id": session_id,
+                "user_id": user_id,
+                "sources": [],
+                "case_studies": [],
+                "lead": lead_data,
+                "lead_saved": lead_state.lead_saved,
+                "lead_form": None,
+                "booking_form": None,
+                "conversation_complete": True
+            }
+            yield f"data: {json.dumps(metadata)}\n\n"
+            
+        return StreamingResponse(event_generator_booking(), media_type="text/event-stream")
+
     # Compile prompt and context
-    system_prompt, knowledge_results, recent_messages = await build_dynamic_prompt(
+    system_prompt, knowledge_results, case_study_results, recent_messages = await build_dynamic_prompt(
         db, session_id, user_id, req.message
     )
 
@@ -855,6 +1035,9 @@ async def chat_stream(
             background_tasks=background_tasks
         )
 
+        # Fetch lead_state to fix NameError below
+        lead_state = await LeadService.get_or_create_lead_state(db, session_id, resolved_user_id)
+
         # Format sources list
         sources = []
         seen_urls = set()
@@ -863,28 +1046,47 @@ async def chat_stream(
                 sources.append({"title": r["title"], "url": r["url"], "score": round(r["score"], 3)})
                 seen_urls.add(r["url"])
 
-        # Map expected input
-        expected_input_data = None
+        # Build lead form & booking form
+        lead_form_data = None
+        booking_form_data = None
+
         if lead_json and lead_json.get("expected_input"):
-            # Double check turn rules & ensure assistant reply actually asks for this field
-            stmt = select(Message).where(Message.conversation_id == session_id, Message.role == "user")
-            user_msg_result = await db.execute(stmt)
-            user_msg_count = len(user_msg_result.scalars().all()) + 1
-            
-            if user_msg_count > settings.MINDFUL_TALK_TURNS:
-                mapped = map_expected_input(lead_json["expected_input"])
-                if mapped and validate_expected_input(mapped, clean_reply):
-                    expected_input_data = mapped
+            expected = str(lead_json["expected_input"]).strip().lower()
+            if expected == "lead_form" and not lead_state.lead_saved:
+                lead_form_data = build_lead_form(lead_data)
+            elif expected == "booking_form" and lead_state.lead_saved and not lead_state.appointment_date:
+                booking_form_data = {
+                    "button_text": "Book Discovery Call",
+                    "title": "Schedule Discovery Call"
+                }
+
+        # Build case studies info list
+        case_studies_list = []
+        seen_cs_urls = set()
+        for cs in case_study_results:
+            if cs["url"] not in seen_cs_urls:
+                summary_text = cs["text"][:200].rsplit(" ", 1)[0] + "..." if len(cs["text"]) > 200 else cs["text"]
+                case_studies_list.append({
+                    "title": cs["title"],
+                    "url": cs["url"],
+                    "summary": summary_text,
+                    "score": round(cs["score"], 3)
+                })
+                seen_cs_urls.add(cs["url"])
 
         # Send final metadata event (use resolved_user_id so frontend updates its stored identity)
+        lead_form_serialized = lead_form_data.model_dump() if lead_form_data else None
         metadata = {
             "type": "metadata",
             "session_id": session_id,
             "user_id": resolved_user_id,
             "sources": sources[:3],
+            "case_studies": case_studies_list,
             "lead": lead_data,
             "lead_saved": lead_just_saved,
-            "expected_input": expected_input_data
+            "lead_form": lead_form_serialized,
+            "booking_form": booking_form_data,
+            "conversation_complete": lead_just_saved and bool(lead_state.appointment_date)
         }
         yield f"data: {json.dumps(metadata)}\n\n"
 

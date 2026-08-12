@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     DEBUG: bool = False
     
+    # Azure / Microsoft Graph Settings
+    AZURE_TENANT_ID: str = "biztechnosys.com"
+    AZURE_CLIENT_ID: str = "0c036f03-5c13-4313-b667-724728101e38"
+    AZURE_CLIENT_SECRET: str = ""  # Set via .env file
+    OUTLOOK_EMAIL: str = "chethana@biztechnosys.com"
+    
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
