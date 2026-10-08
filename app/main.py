@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db, engine
-from app.routers import chat, sessions, booking
+from app.routers import chat, sessions, booking, sales_booking
  
 logging.basicConfig(
     level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
@@ -69,13 +70,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.critical(f"Database connection failed on startup: {e}")
     
-    # Pre-load ML models at startup so they're ready for first request
+    # Configure optimal CPU parallelism for PyTorch inference
+    import os
+    import torch
+    num_threads = min(os.cpu_count() or 4, 8)
+    torch.set_num_threads(num_threads)
+    logger.info(f"PyTorch CPU threads set to {num_threads}")
+    
+    # Pre-load & warmup ML models at startup so they're ready for first request
     from app.services.embedder import EmbedderService
     from app.services.reranker import RerankerService
     logger.info("Loading ML models...")
     EmbedderService.get_model()
     RerankerService.get_model()
-    logger.info("ML models loaded — ready to serve requests")
+    # Warmup both models so initial request suffers zero cold-start delay
+    EmbedderService.encode_single("warmup")
+    RerankerService.rerank("warmup", [{"content": "warmup"}], lambda x: x["content"], top_k=1)
+    logger.info("ML models loaded and warmed up — ready to serve requests")
     
     # Start background crawler scheduler (auto-syncs website content)
     crawler_task = None
@@ -118,6 +129,7 @@ origins = [origin.strip() for origin in settings.CORS_ALLOWED_ORIGINS.split(",")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins if origins else ["*"],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -151,8 +163,8 @@ async def custom_http_exception_handler(request: Request, exc: HTTPException):
 app.include_router(chat.router)
 app.include_router(sessions.router)
 app.include_router(booking.router)
+app.include_router(sales_booking.router)
 
-import os
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir, html=True), name="static")
@@ -187,4 +199,4 @@ async def health(db: AsyncSession = Depends(get_db)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, access_log=False)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=False, access_log=False)

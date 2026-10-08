@@ -52,6 +52,19 @@ class BookingResponse(BaseModel):
     appointment_date: str
     appointment_time: str
 
+class SalesBookingSubmitRequest(BaseModel):
+    session_id: str
+    user_id: str
+    email: str = Field(..., description="Business email address")
+    company_name: str = Field(..., description="Company/organization name")
+    meeting_topic: str = Field(..., description="What they want to discuss")
+    lead_name: Optional[str] = Field("", description="Contact name if known")
+
+class SalesBookingSubmitResponse(BaseModel):
+    success: bool
+    lead_saved: bool
+    message: str
+
 class ChatResponse(BaseModel):
     reply: str
     session_id: str

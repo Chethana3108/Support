@@ -1,5 +1,7 @@
 import os
 from typing import List
+from dotenv import load_dotenv
+load_dotenv(override=True)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
@@ -20,8 +22,8 @@ class Settings(BaseSettings):
     
     # RAG Settings
     EMBEDDING_MODEL: str = "sentence-transformers/all-MiniLM-L6-v2"
-    CHUNK_SIZE: int = 500
-    CHUNK_OVERLAP: int = 100
+    CHUNK_SIZE: int = 2400
+    CHUNK_OVERLAP: int = 400
     
     # Crawler Settings
     CRAWL_BASE_URL: str = "https://beta.biztechnosys.com/"
@@ -29,14 +31,15 @@ class Settings(BaseSettings):
     CRAWL_MAX_PAGES: int = 500
     CRAWL_MAX_DEPTH: int = 10
     CRAWL_CONCURRENT_WORKERS: int = 5
+    ENABLE_AUTO_CRAWLER: bool = False
     
     # RAG Search Tuning
-    TOP_K_KNOWLEDGE: int = 20  # Fetch more candidates for reranking
-    TOP_K_MEMORY: int = 20     # Fetch more candidates for reranking
-    TOP_K_RERANKED: int = 5    # Select top K after cross-encoder reranking
+    TOP_K_KNOWLEDGE: int = 10  # Fetch candidates for reranking (fast, high precision)
+    TOP_K_MEMORY: int = 8      # Fetch candidates for reranking
+    TOP_K_RERANKED: int = 4    # Select top K after cross-encoder reranking
     
-    # Similarity thresholds (increased as recommended to filter out noise)
-    SIMILARITY_THRESHOLD_KNOWLEDGE: float = 0.45
+    # Similarity thresholds (0.25 for high recall candidate retrieval, precision handled by cross-encoder)
+    SIMILARITY_THRESHOLD_KNOWLEDGE: float = 0.25
     SIMILARITY_THRESHOLD_MEMORY: float = 0.55
     SIMILARITY_THRESHOLD_EPISODIC: float = 0.55
     EPISODIC_DEDUPLICATION_THRESHOLD: float = 0.85

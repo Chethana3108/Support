@@ -12,6 +12,7 @@ Usage:
 """
 
 import asyncio
+import functools
 import hashlib
 import logging
 import sys
@@ -28,41 +29,70 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import settings
 from app.models import Base, WebsiteChunk, CrawlState
 from app.services.embedder import EmbedderService
-from scripts.crawler import discover_urls, crawl_and_extract, content_hash
+from scripts.crawler import (
+    discover_urls, crawl_and_extract, content_hash,
+    fetch_sitemap_urls, fetch_sitemaps_from_robots, normalize_url
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ingest")
 
 
 def chunk_documents(documents: List[dict]) -> List[dict]:
-    """Split documents into smaller chunks for embedding, with overlap."""
+    """Split documents into semantic, section-aware chunks with title/URL context."""
+    import re
     all_chunks = []
     for doc in documents:
-        text = doc["content"]
-        paragraphs = text.split("\n")
-        current_chunk = ""
+        title = doc.get("title", "").strip()
+        url = doc.get("url", "").strip()
+        header = f"[Source: {title} | {url}]\n"
+
+        raw_text = doc.get("content", "").strip()
+        if not raw_text:
+            continue
+
+        paragraphs = [p.strip() for p in raw_text.split("\n") if p.strip()]
+        if not paragraphs:
+            continue
+
+        current_paras: List[str] = []
+        current_len = len(header)
 
         for para in paragraphs:
-            if len(current_chunk) + len(para) < settings.CHUNK_SIZE:
-                current_chunk += para + "\n"
-            else:
-                if current_chunk.strip():
-                    all_chunks.append({
-                        "text": current_chunk.strip(),
-                        "url": doc["url"],
-                        "title": doc["title"],
-                    })
-                overlap_text = current_chunk[-settings.CHUNK_OVERLAP:] if len(current_chunk) > settings.CHUNK_OVERLAP else ""
-                current_chunk = overlap_text + para + "\n"
+            para_len = len(para) + 1  # accounting for newline
 
-        if current_chunk.strip():
+            # If adding this paragraph exceeds CHUNK_SIZE and we already have content:
+            if current_paras and (current_len + para_len > settings.CHUNK_SIZE):
+                chunk_body = "\n".join(current_paras)
+                all_chunks.append({
+                    "text": f"{header}{chunk_body}",
+                    "url": url,
+                    "title": title,
+                })
+                # Paragraph-based overlap (preserves complete thoughts, never cuts words)
+                overlap_paras: List[str] = []
+                overlap_len = 0
+                for prev in reversed(current_paras):
+                    if overlap_len + len(prev) <= settings.CHUNK_OVERLAP:
+                        overlap_paras.insert(0, prev)
+                        overlap_len += len(prev)
+                    else:
+                        break
+                current_paras = overlap_paras + [para]
+                current_len = len(header) + sum(len(p) + 1 for p in current_paras)
+            else:
+                current_paras.append(para)
+                current_len += para_len
+
+        if current_paras:
+            chunk_body = "\n".join(current_paras)
             all_chunks.append({
-                "text": current_chunk.strip(),
-                "url": doc["url"],
-                "title": doc["title"],
+                "text": f"{header}{chunk_body}",
+                "url": url,
+                "title": title,
             })
 
-    logger.info(f"Created {len(all_chunks)} chunks from {len(documents)} documents")
+    logger.info(f"Created {len(all_chunks)} semantic chunks from {len(documents)} documents")
     return all_chunks
 
 
@@ -73,10 +103,11 @@ async def embed_and_store_chunks(db: AsyncSession, documents: List[dict]):
         logger.info("No chunks to embed.")
         return 0
 
-    # Generate embeddings
+    # Generate embeddings in a thread pool to avoid blocking the event loop
     logger.info(f"Generating embeddings for {len(chunks)} chunks...")
     texts = [c["text"] for c in chunks]
-    embeddings = EmbedderService.encode(texts)
+    loop = asyncio.get_event_loop()
+    embeddings = await loop.run_in_executor(None, EmbedderService.encode, texts)
 
     for chunk, emb in zip(chunks, embeddings):
         chunk["embedding"] = emb
@@ -111,11 +142,38 @@ async def get_existing_crawl_state(db: AsyncSession) -> Dict[str, str]:
     return {row.url: row.content_hash for row in rows}
 
 
-async def incremental_sync(db: AsyncSession, force: bool = False):
+async def erase_database(db: AsyncSession, erase_all: bool = False):
+    """Erase data from PostgreSQL."""
+    if erase_all:
+        logger.warning("Erasing ALL data across all tables...")
+        from app.models import (
+            User, Conversation, Message, LeadState,
+            MemoryEmbedding, UserEpisodicMemory
+        )
+        await db.execute(delete(MemoryEmbedding))
+        await db.execute(delete(UserEpisodicMemory))
+        await db.execute(delete(LeadState))
+        await db.execute(delete(Message))
+        await db.execute(delete(Conversation))
+        await db.execute(delete(User))
+    
+    logger.warning("Erasing website_chunks and crawl_state...")
+    await db.execute(delete(WebsiteChunk))
+    await db.execute(delete(CrawlState))
+    await db.commit()
+    logger.info("Database erasure complete.")
+
+
+async def incremental_sync(
+    db: AsyncSession,
+    force: bool = False,
+    sitemap_filter: Optional[str] = None,
+    specific_urls: Optional[List[str]] = None,
+):
     """
     Perform incremental sync of website content:
     
-    1. Discover all URLs via BFS crawl
+    1. Discover all URLs via robots.txt sitemaps or specific URLs
     2. Fetch and extract content from each URL
     3. Compare content hashes against crawl_state:
        - New URLs → embed & insert
@@ -125,26 +183,55 @@ async def incremental_sync(db: AsyncSession, force: bool = False):
     4. Update crawl_state table
     """
     now = datetime.now(timezone.utc)
-    
-    # Step 1: Discover all URLs
-    logger.info(f"Discovering URLs from {settings.CRAWL_BASE_URL}...")
-    discovered_urls = discover_urls(
-        base_url=settings.CRAWL_BASE_URL,
-        max_pages=settings.CRAWL_MAX_PAGES,
-        max_depth=settings.CRAWL_MAX_DEPTH,
-        max_workers=settings.CRAWL_CONCURRENT_WORKERS,
-    )
+    loop = asyncio.get_event_loop()
+
+    if specific_urls:
+        discovered_urls = [normalize_url(u) for u in specific_urls]
+        logger.info(f"Targeting {len(discovered_urls)} specific URLs")
+    else:
+        # Step 1: Discover sitemaps declared in robots.txt
+        logger.info(f"Discovering sitemaps from {settings.CRAWL_BASE_URL}robots.txt...")
+        all_sitemaps = await loop.run_in_executor(
+            None, fetch_sitemaps_from_robots, settings.CRAWL_BASE_URL
+        )
+
+        if sitemap_filter:
+            target_sitemaps = [s for s in all_sitemaps if sitemap_filter.lower() in s.lower()]
+            logger.info(f"Targeting sitemaps matching '{sitemap_filter}': {target_sitemaps}")
+        else:
+            # If sitemap.xml exists in the list alongside sub-sitemaps, use sub-sitemaps to avoid duplicate recursion
+            sub_sitemaps = [s for s in all_sitemaps if not s.endswith('/sitemap.xml')]
+            target_sitemaps = sub_sitemaps if sub_sitemaps else all_sitemaps
+            logger.info(f"Using sitemaps: {target_sitemaps}")
+
+        sitemap_urls: List[str] = []
+        for sm in target_sitemaps:
+            fetched = await loop.run_in_executor(None, fetch_sitemap_urls, sm)
+            sitemap_urls.extend(fetched)
+            logger.info(f"Sitemap {sm}: {len(fetched)} URLs")
+
+        # Deduplicate sitemap URLs
+        sitemap_urls = list(dict.fromkeys(sitemap_urls))
+        logger.info(f"Total unique sitemap seed URLs: {len(sitemap_urls)}")
+
+        # Target all URLs directly from the declared sitemaps for fast, comprehensive coverage
+        discovered_urls = sitemap_urls
     
     if not discovered_urls:
         logger.error("No URLs discovered. Aborting sync.")
         return
     
-    logger.info(f"Discovered {len(discovered_urls)} URLs")
+    logger.info(f"Discovered {len(discovered_urls)} URLs across sitemaps")
     
-    # Step 2: Fetch and extract content
-    documents = crawl_and_extract(
-        urls=discovered_urls,
-        max_workers=settings.CRAWL_CONCURRENT_WORKERS,
+    # Fetch and extract content concurrently in thread pool
+    crawl_workers = max(settings.CRAWL_CONCURRENT_WORKERS, 15)
+    documents = await loop.run_in_executor(
+        None,
+        functools.partial(
+            crawl_and_extract,
+            urls=discovered_urls,
+            max_workers=crawl_workers,
+        )
     )
     
     if not documents:
@@ -157,10 +244,19 @@ async def incremental_sync(db: AsyncSession, force: bool = False):
     
     # Step 3: Get existing crawl state
     if force:
-        logger.info("Force mode: dropping all existing data...")
-        await db.execute(delete(WebsiteChunk))
-        await db.execute(delete(CrawlState))
-        existing_state: Dict[str, str] = {}
+        if specific_urls:
+            logger.info(f"Force mode for {len(specific_urls)} specific URLs: dropping chunks for those URLs...")
+            for u in specific_urls:
+                await db.execute(delete(WebsiteChunk).where(WebsiteChunk.url == u))
+                await db.execute(delete(CrawlState).where(CrawlState.url == u))
+            existing_state: Dict[str, str] = await get_existing_crawl_state(db)
+            for u in specific_urls:
+                existing_state.pop(u, None)
+        else:
+            logger.info("Force mode: dropping all existing data...")
+            await db.execute(delete(WebsiteChunk))
+            await db.execute(delete(CrawlState))
+            existing_state: Dict[str, str] = {}
     else:
         existing_state = await get_existing_crawl_state(db)
     
@@ -168,7 +264,7 @@ async def incremental_sync(db: AsyncSession, force: bool = False):
     
     # Classify URLs
     new_urls = crawled_urls - existing_urls
-    removed_urls = existing_urls - crawled_urls
+    removed_urls = (existing_urls - crawled_urls) if not specific_urls else set()
     potentially_changed_urls = crawled_urls & existing_urls
     
     changed_urls: Set[str] = set()
@@ -267,8 +363,16 @@ async def incremental_sync(db: AsyncSession, force: bool = False):
 
 async def main():
     """Entry point for manual ingestion runs."""
-    force = "--force" in sys.argv
-    
+    import argparse
+    parser = argparse.ArgumentParser(description="Biztechnosys Website Ingestion & Incremental Sync")
+    parser.add_argument("--force", action="store_true", help="Clear past website chunks and crawl state before syncing")
+    parser.add_argument("--erase-all", action="store_true", help="Clear all database tables before syncing")
+    parser.add_argument("--erase-only", action="store_true", help="Erase data without syncing new content")
+    parser.add_argument("--sitemap", type=str, default=None, help="Target specific sitemap (e.g. pages-sitemap.xml)")
+    parser.add_argument("--urls", type=str, default=None, help="Comma-separated specific URLs to ingest")
+
+    args = parser.parse_args()
+
     logger.info("Initializing DB Engine...")
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
     AsyncSessionLocal = async_sessionmaker(
@@ -277,7 +381,19 @@ async def main():
 
     async with AsyncSessionLocal() as db:
         try:
-            await incremental_sync(db, force=force)
+            if args.erase_only:
+                await erase_database(db, erase_all=args.erase_all)
+            else:
+                if args.erase_all:
+                    await erase_database(db, erase_all=True)
+                
+                specific_urls = [u.strip() for u in args.urls.split(",") if u.strip()] if args.urls else None
+                await incremental_sync(
+                    db,
+                    force=args.force or args.erase_all,
+                    sitemap_filter=args.sitemap,
+                    specific_urls=specific_urls,
+                )
         except Exception as e:
             logger.error(f"Ingestion failed: {e}", exc_info=True)
             await db.rollback()

@@ -132,3 +132,7 @@ main.py
 *.log
 server_stdout.log
 server_stderr.log
+
+# Node dependencies & builds
+node_modules/
+dist/

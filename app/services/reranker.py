@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import List, Dict, Any, Callable
 from sentence_transformers import CrossEncoder
@@ -38,16 +39,38 @@ class RerankerService:
         model = cls.get_model()
         pairs: List[Any] = [[query, text_extractor(item)] for item in items]
         
-        # Predict similarity scores
-        # ms-marco-MiniLM outputs a raw logit score where higher is more relevant.
-        scores = model.predict(pairs, show_progress_bar=False)
+        # Predict similarity scores with optimized batch size for CPU vectorization
+        scores = model.predict(pairs, batch_size=16, show_progress_bar=False)
         
-        # Attach scores to the candidate dicts
+        # Attach scores to the candidate dicts, boosting exact keyword matches
         for item, score in zip(items, scores):
-            item["rerank_score"] = float(score)
+            final_score = float(score)
+            if item.get("is_exact_match"):
+                final_score += 2.5
+            item["rerank_score"] = final_score
             
         # Sort descending by rerank score
         reranked = sorted(items, key=lambda x: x["rerank_score"], reverse=True)
         
+        # Filter out low-relevance results to prevent hallucination from bad context.
+        # ms-marco-MiniLM outputs logit scores where negative values indicate low relevance.
+        MIN_RERANK_SCORE = -3.5
+        before_count = len(reranked)
+        reranked = [item for item in reranked if item["rerank_score"] > MIN_RERANK_SCORE or item.get("is_exact_match")]
+        if before_count != len(reranked):
+            logger.debug(f"Filtered {before_count - len(reranked)} low-relevance candidates (score <= {MIN_RERANK_SCORE})")
+        
         logger.debug(f"Reranked {len(items)} candidates down to top {min(top_k, len(reranked))}")
         return reranked[:top_k]
+
+    @classmethod
+    async def rerank_async(
+        cls,
+        query: str,
+        items: List[Dict[str, Any]],
+        text_extractor: Callable[[Dict[str, Any]], str],
+        top_k: int
+    ) -> List[Dict[str, Any]]:
+        """Async wrapper: runs rerank() in a thread pool to avoid blocking the event loop."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, cls.rerank, query, items, text_extractor, top_k)

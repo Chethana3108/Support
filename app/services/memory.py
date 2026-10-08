@@ -83,7 +83,7 @@ class MemoryService:
         await db.flush() # Populate message.id
 
         # Generate embedding (hits LRU cache) and save to memory_embeddings
-        embedding_vector = EmbedderService.encode_single(content)
+        embedding_vector = await EmbedderService.encode_single_async(content)
         memory_entry = MemoryEmbedding(
             message_id=message.id,
             conversation_id=conversation_id,
@@ -107,21 +107,21 @@ class MemoryService:
         recent_message_ids: Set[uuid.UUID],
         candidate_k: Optional[int] = None,
         final_k: Optional[int] = None,
-        threshold: Optional[float] = None
+        threshold: Optional[float] = None,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Search historical conversation memory *across all conversations* of this user.
         Excludes messages that are currently in the active chat context.
-        Reranks top candidates using Cross-Encoder.
+        Uses pgvector cosine distance directly for high-speed retrieval.
         """
-        if candidate_k is None:
-            candidate_k = settings.TOP_K_MEMORY
         if final_k is None:
             final_k = settings.TOP_K_RERANKED
         if threshold is None:
             threshold = settings.SIMILARITY_THRESHOLD_MEMORY
 
-        query_embedding = EmbedderService.encode_single(query)
+        if query_embedding is None:
+            query_embedding = await EmbedderService.encode_single_async(query)
 
         # Cosine distance computation
         cosine_distance = MemoryEmbedding.embedding.cosine_distance(query_embedding).label("distance")
@@ -138,33 +138,22 @@ class MemoryService:
         if recent_message_ids:
             stmt = stmt.where(MemoryEmbedding.message_id.notin_(list(recent_message_ids)))
 
-        stmt = stmt.order_by("distance").limit(candidate_k)
+        stmt = stmt.order_by("distance").limit(final_k)
 
         result = await db.execute(stmt)
         rows = result.all()
 
-        candidates = []
+        memories = []
         for mem, dist in rows:
             similarity = 1.0 - dist
-            candidates.append({
+            memories.append({
                 "message_id": str(mem.message_id),
                 "role": mem.meta.get("role", "user"),
                 "content": mem.content,
                 "score": float(similarity)
             })
 
-        if not candidates:
-            return []
-
-        # Rerank memories using Cross-Encoder
-        reranked_memories = RerankerService.rerank(
-            query=query,
-            items=candidates,
-            text_extractor=lambda item: item["content"],
-            top_k=final_k
-        )
-
-        return reranked_memories
+        return memories
 
     @classmethod
     async def search_episodic_memories(
@@ -173,13 +162,15 @@ class MemoryService:
         user_id: str,
         query: str,
         top_k: int = 5,
-        threshold: Optional[float] = None
+        threshold: Optional[float] = None,
+        query_embedding: Optional[List[float]] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve relevant episodic memory summaries for the user."""
         if threshold is None:
             threshold = settings.SIMILARITY_THRESHOLD_EPISODIC
 
-        query_embedding = EmbedderService.encode_single(query)
+        if query_embedding is None:
+            query_embedding = await EmbedderService.encode_single_async(query)
         cosine_distance = UserEpisodicMemory.embedding.cosine_distance(query_embedding).label("distance")
         max_distance = 1.0 - threshold
 
@@ -213,7 +204,7 @@ class MemoryService:
             return
 
         fact_clean = fact.strip()
-        query_embedding = EmbedderService.encode_single(fact_clean)
+        query_embedding = await EmbedderService.encode_single_async(fact_clean)
 
         # Check for highly similar facts already stored for this user
         cosine_distance = UserEpisodicMemory.embedding.cosine_distance(query_embedding)

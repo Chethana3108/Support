@@ -1,5 +1,6 @@
 import logging
 import json
+import httpx
 from typing import Dict, Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,7 +44,7 @@ class LeadService:
                     lead_name=prev_lead.lead_name,
                     company_name=prev_lead.company_name,
                     email=prev_lead.email,
-                    appointment_date=prev_lead.appointment_date,
+                    appointment_date="",
                     phone=prev_lead.phone,
                     country=prev_lead.country,
                     notes=prev_lead.notes,
@@ -159,7 +160,7 @@ class LeadService:
         lead_state = await cls.get_or_create_lead_state(db, conversation_id, user_id)
         newly_filled = {}
 
-        for key in ["lead_name", "company_name", "email", "appointment_date", "phone", "country", "notes"]:
+        for key in ["lead_name", "company_name", "email", "phone", "country", "notes"]:
             val = new_data.get(key, "")
             if isinstance(val, str):
                 val = val.strip()
@@ -213,18 +214,29 @@ class LeadService:
         - If the lead is already saved and new fields (email, phone, etc.) are collected later,
           UPDATE the existing lead in ERPNext.
         """
-        # Minimum fields required for lead creation in ERPNext
-        has_mandatory = bool(lead_state.lead_name and lead_state.company_name)
+        # ONLY sync to ERPNext if an appointment is actually booked!
+        # Leads without an appointment are kept in local DB only and never stored in ERPNext.
+        if not lead_state.appointment_date or not lead_state.appointment_date.strip():
+            logger.debug(
+                f"Skipping ERPNext sync for session {lead_state.conversation_id}: "
+                f"No appointment booked yet. Only leads with confirmed appointments are saved to ERPNext."
+            )
+            return False
+
+        has_mandatory = bool(lead_state.appointment_date and (lead_state.lead_name or lead_state.email))
 
         logger.debug(
             f"Lead sync check: name='{lead_state.lead_name}', "
-            f"company='{lead_state.company_name}', saved={lead_state.lead_saved}, "
-            f"lead_id='{lead_state.lead_id}', has_mandatory={has_mandatory}, "
-            f"newly_filled={newly_filled}"
+            f"company='{lead_state.company_name}', appointment='{lead_state.appointment_date}', "
+            f"saved={lead_state.lead_saved}, lead_id='{lead_state.lead_id}'"
         )
 
+        lead_name_val = (lead_state.lead_name or "").strip()
+        if not lead_name_val and lead_state.email:
+            lead_name_val = lead_state.email.split("@")[0].capitalize()
+
         lead_dict = {
-            "lead_name": lead_state.lead_name,
+            "lead_name": lead_name_val or "Website Lead",
             "company_name": lead_state.company_name,
             "email": lead_state.email,
             "appointment_date": lead_state.appointment_date,
@@ -332,6 +344,32 @@ class LeadService:
                     return True
                 else:
                     logger.error(f"Failed to update lead {target_lead_id}: {result}")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    # Lead was deleted from ERPNext — reset and create a new one
+                    logger.warning(
+                        f"Lead {target_lead_id} no longer exists in ERPNext (404). "
+                        f"Resetting local state and creating a new lead."
+                    )
+                    lead_state.lead_saved = False
+                    lead_state.lead_id = None
+                    await db.commit()
+                    try:
+                        result = await ERPNextService.create_lead(lead_dict)
+                        if result.get("success"):
+                            lead_state.lead_saved = True
+                            try:
+                                res_json = json.loads(result["detail"])
+                                lead_state.lead_id = res_json["data"]["name"]
+                            except Exception as parse_err:
+                                logger.warning(f"Could not parse created ERPNext lead ID: {parse_err}")
+                            await db.commit()
+                            logger.info(f"Lead re-created after 404: {lead_state.lead_id}")
+                            return True
+                    except Exception as create_err:
+                        logger.error(f"Failed to re-create lead after 404: {create_err}", exc_info=True)
+                else:
+                    logger.error(f"Failed to update lead {lead_state.lead_id}: {e}", exc_info=True)
             except Exception as e:
                 logger.error(f"Failed to update lead {lead_state.lead_id}: {e}", exc_info=True)
         else:

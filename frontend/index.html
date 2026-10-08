@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Biz Assistant | Biztechnosys</title>
+  <meta name="description" content="Enterprise AI Sales & Support Assistant by Biztechnosys.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+  <!-- CHATBOT WIDGET -->
+  <div id="bizbot-root">
+    
+    <!-- Launcher Button (bottom-right) -->
+    <button class="bz-launcher" id="bz-launcher" title="Chat with Biz Assistant">
+      <img src="./avatar.png" alt="Biz Assistant Avatar" class="bz-launcher-avatar-thumb">
+      <span>Talk to Biz Assistant</span>
+    </button>
+
+    <!-- Main Widget Window (hidden by default) -->
+    <div class="bz-widget bz-hide" id="bz-widget">
+      
+      <!-- Top Action Controls -->
+      <div class="bz-controls">
+        <button class="bz-ctrl-btn" id="bz-new-chat" title="New Chat">🔄</button>
+        <button class="bz-ctrl-btn" id="bz-clear-history" title="Clear History">🗑️</button>
+        <button class="bz-ctrl-btn" id="bz-expand" title="Expand / Shrink">⤢</button>
+        <button class="bz-ctrl-btn" id="bz-close" title="Close">✕</button>
+      </div>
+
+      <!-- Avatar Header -->
+      <div class="bz-avatar-wrap" id="bz-avatar">
+        <img 
+          src="./avatar.png" 
+          alt="Biz Assistant AI Avatar" 
+          class="bz-avatar-poster" 
+          id="bz-avatar-poster"
+        >
+        <div class="bz-avatar-grad"></div>
+      </div>
+
+      <!-- Scrollable Chat Body -->
+      <div class="bz-body" id="bz-body">
+        <div class="bz-greeting" id="bz-greeting">
+          Hi, I'm <strong>Biz Assistant</strong> from Biztechnosys. I help enterprises accelerate digital transformation and customer engagement with Sitecore composable solutions. How can I assist you today?
+        </div>
+
+        <div class="bz-chips" id="bz-chips">
+          <button class="bz-chip" id="bz-chip-sales">Book a Meeting with Sales</button>
+          <button class="bz-chip" id="bz-chip-support">Support</button>
+        </div>
+      </div>
+
+      <!-- Footer Input Bar -->
+      <div class="bz-footer">
+        <div class="bz-input-row">
+          <input type="text" id="bz-input" placeholder="Ask Biz Assistant a question..." autocomplete="off">
+          <button class="bz-send-btn" id="bz-send" title="Send Message">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+          </button>
+        </div>
+        <div class="bz-privacy">
+          Powered by Biztechnosys AI. <a href="https://beta.biztechnosys.com/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Logic Module -->
+  <script type="module" src="./app.js"></script>
+
+</body>
+</html>

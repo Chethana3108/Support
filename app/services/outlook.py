@@ -1,8 +1,16 @@
 import logging
 import datetime
+import smtplib
+import socket
 from datetime import timedelta, datetime as dt, time as dt_time
 from typing import List, Dict, Any, Optional
 import httpx
+
+try:
+    import dns.resolver
+    HAS_DNS = True
+except ImportError:
+    HAS_DNS = False
 
 from app.config import settings
 
@@ -72,6 +80,128 @@ class OutlookService:
                 except Exception as e:
                     logger.error(f"Exception requesting MS Graph token for tenant '{t_id}': {e}")
             return None
+
+    @classmethod
+    async def verify_email_exists(cls, email: str) -> Dict[str, Any]:
+        """Verify whether an email address actually exists (has a real mailbox).
+        
+        For @biztechnosys.com emails: checks Azure AD via MS Graph API.
+        For external emails: does DNS MX lookup + SMTP RCPT TO verification.
+        
+        Returns:
+            Dict with 'exists' (bool), 'reason' (str), and 'method' (str).
+        """
+        if not email or "@" not in email:
+            return {"exists": False, "reason": "Invalid email format", "method": "format_check"}
+        
+        email_clean = email.strip().lower()
+        domain = email_clean.split("@")[-1]
+        
+        # ── METHOD 1: MS Graph lookup for biztechnosys.com (own tenant) ──
+        if domain == "biztechnosys.com":
+            return await cls._verify_via_msgraph(email_clean)
+        
+        # ── METHOD 2: SMTP verification for external domains ──
+        return await cls._verify_via_smtp(email_clean, domain)
+    
+    @classmethod
+    async def _verify_via_msgraph(cls, email: str) -> Dict[str, Any]:
+        """Check if a biztechnosys.com email exists in Azure AD via MS Graph."""
+        token = await cls.get_access_token()
+        if not token:
+            logger.warning("MS Graph token unavailable for email verification; allowing email")
+            return {"exists": True, "reason": "Could not verify (no token), allowing", "method": "msgraph_skip"}
+        
+        url = f"https://graph.microsoft.com/v1.0/users/{email}"
+        headers = {"Authorization": f"Bearer {token}"}
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                res = await client.get(url, headers=headers)
+                if res.status_code == 200:
+                    user_data = res.json()
+                    display_name = user_data.get("displayName", "")
+                    logger.info(f"MS Graph: Email '{email}' exists (user: {display_name})")
+                    return {"exists": True, "reason": f"User found: {display_name}", "method": "msgraph"}
+                elif res.status_code == 404:
+                    logger.info(f"MS Graph: Email '{email}' does NOT exist in Azure AD")
+                    return {"exists": False, "reason": "Email does not exist in the organization", "method": "msgraph"}
+                else:
+                    logger.warning(f"MS Graph user lookup returned {res.status_code}: {res.text[:200]}")
+                    return {"exists": True, "reason": f"Could not verify (HTTP {res.status_code}), allowing", "method": "msgraph_error"}
+            except Exception as e:
+                logger.error(f"MS Graph email verification error: {e}")
+                return {"exists": True, "reason": "Verification failed, allowing", "method": "msgraph_error"}
+    
+    @classmethod
+    async def _verify_via_smtp(cls, email: str, domain: str) -> Dict[str, Any]:
+        """Verify an external email exists using DNS MX lookup + SMTP RCPT TO handshake."""
+        import asyncio
+        
+        def _smtp_check():
+            # Step 1: DNS MX lookup
+            if not HAS_DNS:
+                logger.warning("dnspython not installed; skipping SMTP email verification")
+                return {"exists": True, "reason": "DNS library unavailable, allowing", "method": "smtp_skip"}
+            
+            try:
+                mx_records = dns.resolver.resolve(domain, "MX")
+                mx_hosts = sorted(mx_records, key=lambda r: r.preference)
+                if not mx_hosts:
+                    return {"exists": False, "reason": "No mail servers found for this domain", "method": "smtp_mx"}
+            except dns.resolver.NXDOMAIN:
+                return {"exists": False, "reason": "Email domain does not exist", "method": "smtp_mx"}
+            except dns.resolver.NoAnswer:
+                return {"exists": False, "reason": "No mail servers found for this domain", "method": "smtp_mx"}
+            except Exception as e:
+                logger.warning(f"DNS MX lookup failed for {domain}: {e}")
+                return {"exists": True, "reason": "DNS lookup failed, allowing", "method": "smtp_error"}
+            
+            # Step 2: SMTP RCPT TO check — 3s timeout per connection
+            for mx in mx_hosts[:2]:  # Only try first 2 MX hosts to limit total time
+                mx_host = str(mx.exchange).rstrip(".")
+                try:
+                    smtp = smtplib.SMTP(timeout=3)  # 3s per connection (was 8s)
+                    smtp.connect(mx_host, 25)
+                    smtp.helo("biztechnosys.com")
+                    smtp.mail("verify@biztechnosys.com")
+                    code, message = smtp.rcpt(email)
+                    smtp.quit()
+                    
+                    if code == 250:
+                        logger.info(f"SMTP: Email '{email}' exists (verified via {mx_host})")
+                        return {"exists": True, "reason": "Email verified", "method": "smtp"}
+                    elif code == 550 or code == 553 or code == 551:
+                        logger.info(f"SMTP: Email '{email}' does NOT exist (code={code} via {mx_host})")
+                        return {"exists": False, "reason": "Email address does not exist", "method": "smtp"}
+                    else:
+                        # Ambiguous response (e.g., 252 = cannot verify but will attempt delivery)
+                        logger.info(f"SMTP: Ambiguous response for '{email}' (code={code}), allowing")
+                        return {"exists": True, "reason": f"Could not confirm (code={code}), allowing", "method": "smtp_ambiguous"}
+                except smtplib.SMTPServerDisconnected:
+                    continue
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    logger.warning(f"SMTP check failed via {mx_host}: {e}")
+                    continue
+            
+            # If all MX hosts failed, allow the email (benefit of the doubt)
+            return {"exists": True, "reason": "SMTP verification inconclusive, allowing", "method": "smtp_error"}
+        
+        # Run blocking SMTP check in thread pool with an 8-second total cap
+        try:
+            result = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, _smtp_check),
+                timeout=8.0  # Never block the endpoint for more than 8s total
+            )
+            return result
+        except asyncio.TimeoutError:
+            logger.warning(f"SMTP verification timed out for {email}, allowing")
+            return {"exists": True, "reason": "Verification timed out, allowing", "method": "smtp_timeout"}
+        except Exception as e:
+            logger.error(f"Email SMTP verification error: {e}")
+            return {"exists": True, "reason": "Verification error, allowing", "method": "smtp_error"}
 
     @classmethod
     def parse_slot_time(cls, date_obj: datetime.date, time_str: str) -> dt:
