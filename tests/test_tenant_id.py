@@ -1,5 +1,10 @@
 import asyncio
+import os
+import sys
 import httpx
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from app.config import settings
 
 async def test_tenant(tenant_id):

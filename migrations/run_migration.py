@@ -1,10 +1,14 @@
 import asyncio
 import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from sqlalchemy import text
 from app.database import engine
 
 async def run_migration():
-    migration_path = os.path.join("migrations", "003_add_country.sql")
+    migration_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "003_add_country.sql")
     if not os.path.exists(migration_path):
         print(f"Error: Migration file not found at {migration_path}")
         return
