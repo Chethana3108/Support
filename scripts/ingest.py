@@ -20,7 +20,7 @@ import os
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Set
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, update, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 # Add workspace directory to python path
@@ -361,6 +361,19 @@ async def incremental_sync(
     )
 
 
+async def ensure_schema(engine):
+    """Ensure required extensions and migration columns exist before running."""
+    logger.info("Ensuring database schema and columns exist...")
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"))
+        await conn.execute(text("ALTER TABLE website_chunks ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;"))
+        await conn.execute(text("ALTER TABLE lead_state ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';"))
+        await conn.execute(text("ALTER TABLE lead_state ADD COLUMN IF NOT EXISTS appointment_date VARCHAR DEFAULT '';"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;"))
+
+
 async def main():
     """Entry point for manual ingestion runs."""
     import argparse
@@ -375,6 +388,7 @@ async def main():
 
     logger.info("Initializing DB Engine...")
     engine = create_async_engine(settings.DATABASE_URL, echo=False)
+    await ensure_schema(engine)
     AsyncSessionLocal = async_sessionmaker(
         bind=engine, class_=AsyncSession, expire_on_commit=False
     )
