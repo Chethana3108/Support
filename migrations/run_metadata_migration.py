@@ -13,10 +13,14 @@ from app.config import settings
 async def run_migration():
     engine = create_async_engine(settings.DATABASE_URL)
     async with engine.begin() as conn:
-        await conn.execute(text(
-            "ALTER TABLE website_chunks ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb"
-        ))
-        print("Migration successful: metadata column added to website_chunks")
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"))
+        await conn.execute(text("ALTER TABLE website_chunks ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;"))
+        await conn.execute(text("ALTER TABLE lead_state ADD COLUMN IF NOT EXISTS country TEXT DEFAULT '';"))
+        await conn.execute(text("ALTER TABLE lead_state ADD COLUMN IF NOT EXISTS appointment_date VARCHAR DEFAULT '';"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT;"))
+        await conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;"))
+        print("Migration successful: all missing columns and extensions added!")
         
         # Verify it exists
         result = await conn.execute(text(
