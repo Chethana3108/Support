@@ -27,7 +27,8 @@ class EmbedderService:
             return []
         model = cls.get_model()
         # normalize_embeddings=True yields unit-length embeddings (cosine similarity = dot product)
-        embeddings = model.encode(texts, batch_size=128, normalize_embeddings=True, show_progress_bar=False)
+        show_bar = len(texts) > 10
+        embeddings = model.encode(texts, batch_size=128, normalize_embeddings=True, show_progress_bar=show_bar)
         return embeddings.tolist()
 
     @classmethod
