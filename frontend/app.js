@@ -238,7 +238,7 @@ bookingFlowStyleEl.textContent = `
 document.head.appendChild(bookingFlowStyleEl);
 
 
-function startSalesBookingFlow() {
+function startSalesBookingFlow(triggerText = "Book a Meeting with Sales") {
   salesBookingState = { active: true, fullName: "", email: "", companyName: "", meetingTopic: "" };
 
   if (isFirstMessage) {
@@ -247,7 +247,7 @@ function startSalesBookingFlow() {
     if (chipsEl) chipsEl.style.display = "none";
   }
 
-  appendUserMessage("Book a Meeting with Sales");
+  appendUserMessage(triggerText);
 
   const row = document.createElement("div");
   row.className = "bz-msg-row bot";
@@ -705,7 +705,7 @@ async function sendMessage(explicitText) {
   );
   if (isBookingIntent) {
     inputEl.value = "";
-    startSalesBookingFlow();
+    startSalesBookingFlow(text);
     return;
   }
 

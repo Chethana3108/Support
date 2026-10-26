@@ -31,7 +31,7 @@ async def call_deepseek(messages: list) -> str:
                 "model": "deepseek-chat",
                 "messages": messages,
                 "temperature": 0.1,
-                "max_tokens": 500,
+                "max_tokens": 800,
                 "stream": False,
             },
         )
@@ -59,7 +59,7 @@ def stream_deepseek(messages: list):
             "model": "deepseek-chat",
             "messages": messages,
             "temperature": 0.1,
-            "max_tokens": 500,
+            "max_tokens": 800,
             "stream": True,
         }
     )

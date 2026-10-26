@@ -840,7 +840,7 @@
   document.head.appendChild(bookingFlowStyle);
 
 
-  function startSalesBookingFlow() {
+  function startSalesBookingFlow(triggerText = "Book a Meeting with Sales") {
     // Reset state
     salesBookingState = { active: true, email: "", companyName: "", meetingTopic: "" };
 
@@ -851,7 +851,7 @@
     }
 
     // Show user's action
-    appendUserMessage("Book a Meeting with Sales");
+    appendUserMessage(triggerText);
 
     // Bot asks for email
     const row = document.createElement("div");
@@ -1427,7 +1427,7 @@
     );
     if (isBookingIntent) {
       inputEl.value = "";
-      startSalesBookingFlow();
+      startSalesBookingFlow(text);
       return;
     }
 

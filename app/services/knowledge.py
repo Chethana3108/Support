@@ -138,7 +138,15 @@ class KnowledgeService:
             'uday', 'manish', 'ramachandran', 'kalpesh', 'sanghani', 'vaza'
         ]
         if any(term in clean_q.lower() for term in leadership_terms):
-            stmt_lead = select(WebsiteChunk).where(WebsiteChunk.content.ilike('%Meet Our Team%')).limit(2)
+            stmt_lead = select(WebsiteChunk).where(
+                or_(
+                    WebsiteChunk.content.ilike('%Kalpesh Vaza%'),
+                    WebsiteChunk.content.ilike('%Leadership & Team%'),
+                    WebsiteChunk.content.ilike('%Meet Our Team%'),
+                    WebsiteChunk.title.ilike('%Leadership%'),
+                    WebsiteChunk.title.ilike('%Company Information%')
+                )
+            ).limit(4)
             res_lead = await db.execute(stmt_lead)
             for chunk in res_lead.scalars().all():
                 text_content = chunk.content.strip()
@@ -191,11 +199,11 @@ class KnowledgeService:
         if not candidates:
             return []
 
-        # Rerank candidates using Cross-Encoder with Title context (optimized to 600 chars for sub-second CPU inference)
+        # Rerank candidates using Cross-Encoder with full Title and content context (up to 2000 chars to cover full chunk)
         reranked_results = await RerankerService.rerank_async(
             query=query,
             items=candidates,
-            text_extractor=lambda item: f"{item['title']} | {item['text'][:600]}",
+            text_extractor=lambda item: f"{item['title']} | {item['text'][:2000]}",
             top_k=final_k
         )
         
